@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+{% load static %}
+{% include 'links_app/head.html' %}
+<body>
+
+
+    {% if user.is_authenticated %}
+        
+        {% include 'links_app/base.html' %}
+        <div class="container"><h4>Product Inquire</h4></div>
+        <div class="container">
+            <form class="form-inline my-2 my-lg-0" method="POST" action="">
+                <input type="text" name="productcode" placeholder="scan Productcode">
+                <input type="submit" name ="search">
+                {% csrf_token %}
+            </form>
+        </div>
+        <div class="container" style="overflow-y:auto;width: 1000px;float: left; margin-left: 5%;">
+            <form method="POST" action="">
+                <table border="1" class="table table-bordered" style="border-collapse: collapse; width: 50%;font-size: 8px">
+                    
+                    <thead class="header" style="top: 0; z-index: 1; background:#eee; ">
+                        <th style="top: 0; z-index: 1;" >Productcode</th>
+                        <th style="top: 0; z-index: 1;" >Qty</th>
+                    </thead>
+                    {% for k in data %}
+                    <tr>
+                        <td>{{k.productcode}}</td>
+                        <td>{{k.total}}</td>
+                    </tr>
+                    {% empty %}
+                        <h2>No results found</h2>
+                        
+                    {% endfor %}
+                    {% csrf_token %}
+                </table>
+            </form>
+        </div>
+        <div class="container" style="overflow-y:auto;width: 1000px;float: left; margin-left: 5%;">
+            <form method="POST" action="">
+                <table border="1" class="table table-bordered" style="border-collapse: collapse; width: 50%;font-size: 8px">
+                    
+                    <thead class="header" style="top: 0; z-index: 1; background:#eee; ">
+                        <th style="top: 0; z-index: 1;" >Inquire</th>
+                        <th style="top: 0; z-index: 1;" >Data</th>
+                    </thead>
+                    {% for k in data1 %}
+                    <tr>
+                        <td>Client</td>
+                        <td>{{k.client}}</td>
+                    </tr>
+                    <tr>
+                        <td>Description</td>
+                        <td>{{k.description}}</td>
+                    </tr>
+                    <tr>
+                        <td>Barcode</td>
+                        <td>{{k.barcode}}</td>
+                    </tr>
+                    <tr>
+                        <td>CostPrice</td>
+                        <td>{{k.costprice}}</td>
+                    </tr>
+                    <tr>
+                        <td>SalePrice</td>
+                        <td>{{k.saleprice}}</td>
+                    </tr>
+                    <tr>
+                        <td>Unit of Issue</td>
+                        <td>{{k.uoi}}</td>
+                    </tr>
+                    <tr>
+                        <td>Area</td>
+                        <td>{{k.area}}</td>
+                    </tr>
+                    <tr>
+                        <td>SUT</td>
+                        <td>{{k.sut}}</td>
+                    </tr>
+                    <tr>
+                        <td>Movementtype</td>
+                        <td>{{k.movementtype}}</td>
+                    </tr>
+                    <tr>
+                        <td>Status</td>
+                        <td>{{k.status}}</td>
+                    </tr>
+                    {% empty %}
+                        <h2>No results found</h2>
+                        
+                    {% endfor %}
+                    {% csrf_token %}
+                </table>
+            </form>
+        </div>
+
+        {% else %}
+        <li><a class="navbar-link" href="{% url 'user_login' %}">Login</a></li>
+        <li><a class="navbar-link" href="{% url 'register' %}">Regsiter</a></li>
+        {% endif %}
+        {% csrf_token %}
+    </body>
+    <script src="//cdn.datatables.net/1.12.1/js/jquery.dataTables.min.js"></script>
+    <script src="{% static 'javascript/javascript.js' %}" type="text/javascript"></script> 
+</html>

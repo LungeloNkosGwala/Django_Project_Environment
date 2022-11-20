@@ -1,0 +1,19 @@
+{% include 'links_app/head.html' %}
+<body>
+    <div class="jumbotron" style="position: center; padding-left: 300px;padding-top: 100px;">
+        <h1>Welcome to Links Mini V1.1</h1>
+        <h3>Login in</h3>
+        <form action="{% url 'user_login' %}" method="post">
+            <label for="username">Username: </label>
+            <input type="text" name="username" placeholder="username">
+
+            <label for="password">Password: </label>
+            <input type="password" name="password" placeholder="Password">
+
+            <input type="submit" value="Login">
+            {% csrf_token %}
+        </form>
+        
+    </div>
+</body>
+</html>

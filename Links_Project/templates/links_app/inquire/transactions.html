@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+{% load static %}
+{% include 'links_app/head.html' %}
+<body>
+
+
+    {% if user.is_authenticated %}
+        
+        {% include 'links_app/base.html' %}
+        <div class="container"><h4>WorkFlow Analyse</h4></div>
+        <div class="container">
+            <form class="form-inline my-2 my-lg-0" method="GET" action="">
+                <input type="text" name="search" placeholder="Search Asn/Part/HU" value="{{request.GET.asnno}}">
+                <div class="form-row">
+                    <div class="form-group col-md-6">
+                      <label for="inputEmail4">Start date</label>
+                      <input type="date" format='%Y-%m-%d' name="from" class="form-control"  id="inputEmail4" placeholder="Start Date">
+                    </div>
+                    <div class="form-group col-md-6">
+                      <label for="inputEmail4">End date</label>
+                      <input type="date" format='%Y-%m-%d' name="to" class="form-control" id="inputEmail4" placeholder="End date">
+                    </div>
+                  </div>
+                <input type="submit" value="Search">
+            </form>
+        </div>
+        <br>
+        <div class="container" style="height:300px;overflow-y:auto;width: 1000px;float: left; margin-left: 5%;">
+            {% block content %}
+            <table border="1" class="table table-bordered" style="border-collapse: collapse; width: 95%;font-size: 8px">
+                <thead class="header" style="top: 0; z-index: 1; background:#eee; ">
+                    <th style="top: 0; z-index: 1;" >Dept_workflow</th>
+                    <th style="top: 0; z-index: 1;" >WorkFlowType</th>
+                    <th style="top: 0; z-index: 1;" >Origin</th>
+                    <th style="top: 0; z-index: 1;" >Productcode</th>
+                    <th style="top: 0; z-index: 1;" >SoureArea</th>
+                    <th style="top: 0; z-index: 1;" >SourceBin</th>
+                    <th style="top: 0; z-index: 1;" >Initial Qty</th>
+                    <th style="top: 0; z-index: 1;" >Qty</th>
+                    <th style="top: 0; z-index: 1;" >Result Qty</th>
+                    <th style="top: 0; z-index: 1;" >TargetBin</th>
+                    <th style="top: 0; z-index: 1;" >TargetArea</th>
+                    <th style="top: 0; z-index: 1;" >HoldingUnit</th>
+                    <th style="top: 0; z-index: 1;" >User</th>
+                    <th style="top: 0; z-index: 1 width=10%;" >Date</th>
+
+                </thead>
+                {% for k in data %}
+                <tr>
+                    <td>{{k.dept_workflow}}</td>
+                    <td>{{k.workflowtype}}</td>
+                    <td>{{k.origin}}</td>
+                    <td>{{k.productcode}}</td>
+                    <td>{{k.sourcearea}}</td>
+                    <td>{{k.sourcebin}}</td>
+                    <td>{{k.Initial_SOH}}</td>
+                    <td>{{k.qty}}</td>
+                    <td>{{k.Result_SOH}}</td>
+                    <td>{{k.targetbin}}</td>
+                    <td>{{k.targetarea}}</td>
+                    <td>{{k.holdingunit}}</td>
+                    <td>{{k.user_transactions}}</td>
+                    <td>{{k.transactiondate}}</td>
+                </tr>
+                {% empty %}
+                    <h2>No results found</h2>
+                {% endfor %}
+                {% csrf_token %}
+            {% endblock %}
+        </div>
+
+        {% else %}
+        <li><a class="navbar-link" href="{% url 'user_login' %}">Login</a></li>
+        <li><a class="navbar-link" href="{% url 'register' %}">Regsiter</a></li>
+        {% endif %}
+        {% csrf_token %}
+    </body>
+    <script src="//cdn.datatables.net/1.12.1/js/jquery.dataTables.min.js"></script>
+    <script src="{% static 'javascript/javascript.js' %}" type="text/javascript"></script> 
+</html>

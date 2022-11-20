@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+{% load static %}
+{% include 'links_app/head.html' %}
+<body>
+
+
+    {% if user.is_authenticated %}
+        
+        {% include 'links_app/base.html' %}
+
+        <br>
+        <div class="container"><h4>ASN</h4></div>
+        
+
+            <div class="container">
+                <form class="form-inline my-2 my-lg-0" method="GET" action="">
+                    <input type="text" name="asnno" placeholder="Search asnno" value="{{request.GET.asnno}}">
+                    <input type="submit" name ="search">
+                </form>
+            </div>
+            <br>
+            <div class="container" style="height:300px;overflow-y:auto;width: 1000px;float: left; margin-left: 5%;">
+                {% block content %}
+                <table border="1" class="table table-bordered" style="border-collapse: collapse; width: 70%;font-size: 8px">
+                    <thead class="header" style="top: 0; z-index: 1; background:#eee; ">
+                        <th style="top: 0; z-index: 1;" >Client</th>
+                        <th style="top: 0; z-index: 1;" >ASNNO</th>
+                        <th style="top: 0; z-index: 1;" >Type</th>
+                        <th style="top: 0; z-index: 1;" >Reference</th>
+                        <th style="top: 0; z-index: 1;" >ASN CreateDate</th>
+                        <th style="top: 0; z-index: 1;" >Delivery CreateDate</th>
+                    </thead>
+                    {% for k in data %}
+                    <tr>
+                        <td>{{k.client}}</td>
+                        <td>{{k.asnno}}</td>
+                        <td>{{k.type}}</td>
+                        <td>{{k.reference}}</td>
+                        <td>{{k.asn_createdate}}</td>
+                        <td>{{k.delivery_creatdate}}</td>
+                    </tr>
+                    {% empty %}
+                        <h2>No results found</h2>
+                    {% endfor %}
+                    {% csrf_token %}
+                {% endblock %}
+            </div>
+        </div>
+        <br>
+        <div class="container" style="position: relative;width:100%;display: block;">
+            <div class = "col-md-6">
+                <form action="#" method="post">  
+                    <table border="1" class="table table-bordered" style="border-collapse: collapse; width: 70%;font-size: 8px">
+                        <thead>
+                            <th style="width:10%">ASNNO</th>
+                            <th style="width:10%">Productcode</th>
+                            <th style="width:10%">Totalqty</th>
+                            <th style="width:10%">QtyReceived</th>
+                            <th style="width:10%">QtyShort</th>
+                            <th style="width:10%">QtyExtra</th>
+                            <th style="width:10%">QtyDamaged</th>
+                        </thead>
+                        {% for k in sel_data  %}
+                        <tr>
+                            <td>{{k.asnno}}</td>
+                            <td>{{k.productcode}}</td>
+                            <td>{{k.totalqty}}</td>
+                            <td>{{k.qtyreceived}}</td>
+                            <td>{{k.qtyshort}}</td>
+                            <td>{{k.qtyextra}}</td>
+                            <td>{{k.qtydamaged}}</td>
+                        </tr>
+                        {% endfor %}
+                        {% csrf_token %}
+                    </table>
+                </form>
+            </div>
+
+
+        {% else %}
+        <li><a class="navbar-link" href="{% url 'user_login' %}">Login</a></li>
+        <li><a class="navbar-link" href="{% url 'register' %}">Regsiter</a></li>
+        {% endif %}
+        {% csrf_token %}
+    </body>
+    <script src="//cdn.datatables.net/1.12.1/js/jquery.dataTables.min.js"></script>
+    <script src="{% static 'javascript/javascript.js' %}" type="text/javascript"></script> 
+</html>
