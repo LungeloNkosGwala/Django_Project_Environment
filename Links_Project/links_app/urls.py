@@ -16,10 +16,22 @@ urlpatterns = [
         path("putaway/", views.putaway,name="putaway"),
         path("pfep/",views.pfep, name='pfep'),
         path("asn_inquire/",views.asn_inquire,name="asn_inquire"),
+        path("bin_inquire/",views.bin_inquire,name="bin_inquire"),
         path("transactions/",views.transactions, name='transactions'),
         path("create_pickingslip/",views.create_pickingslip,name="create_pickingslip"),
         path("analytics/",views.analytics, name="analytics"),
         path("product_inquire/",views.product_inquire,name='product_inquire'),
+        path("base_system",views.base_system,name="base_system" ),
+        path("cust_routecode",views.cust_routecode,name='cust_routecode'),
+        path("routecode_update/",views.routecode_update,name='routecode_update'),
+        path("user_management/",views.user_management, name='user_management'),
+        path("allocationcapacity/",views.allocationcapacity,name="allocationcapacity"),
+        path("ordermanagement/",views.ordermanagement,name='ordermanagement'),
+        path("rep_inbound/",views.rep_inbound, name="rep_inbound"),
+        path("orderschedule/", views.orderschedule,name="orderschedule"),
+        path("user_picks/",views.user_picks, name='user_picks'),
+        path("outboundstaging/",views.outboundStaging, name="outboundstaging"),
+        path("pickstaging/",views.pickStaging, name="pickstaging"),
 ]
 
 

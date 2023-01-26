@@ -8,7 +8,10 @@
         
         {% include 'links_app/base.html' %}
         <br>
-        <div class="container"><h2 style ="font-size: 15px">Allocated ASNs</h2></div>
+        <div class="container" style="text-align: center; border-radius: 10px;
+        background-color:#eee;; box-shadow: 0 20px 35px rgba(20,0,20,0.1);
+        width:370px;margin: 0.1rem auto;"><h1 style="color: green;font-size: 30px;">Receiving</h1></div>
+        <div class="container"><hr class="rounded" style="border-top: 8px solid #bbb;border-radius: 5px;width: 100%"></div>
             <div class ="container" style="position: relative;width:100%;display: block;">
             <div class = "col-md-6">
                 <form action="#" method="post">  
@@ -39,9 +42,8 @@
             </div>
             
         <br>
-        <div class="container"><h2 style ="font-size: 15px">Receive Line</h2></div>
+        <div class="container"><hr class="rounded" style="border-top: 8px solid #bbb;border-radius: 5px;width: 100%"></div>
         <div class="container">
-            <hr class="rounded" style="border-top: 8px solid #bbb;border-radius: 5px;width: 40%">
             <form method="post" action="#">
                 <label for="">HoldingUnit</label>
                 <input type="text" id="hu" name="hu" placeholder="Scan HU" Required>
@@ -61,8 +63,9 @@
                 {% csrf_token %}
             </form>
         </div>
-        <div class="container">{% include 'links_app/message.html' %}</div>
-        <br>
+        <div class="container"><hr class="rounded" style="border-top: 8px solid #bbb;border-radius: 5px;width: 100%"></div>
+        {% include 'links_app/message.html' %}
+        <div class="container"><hr class="rounded" style="border-top: 8px solid #bbb;border-radius: 5px;width: 100%"></div>
         <div class = "container">
             <div class = "col-md-6">
                 <form action="#" method="post">  
@@ -79,7 +82,7 @@
                             <td><button type="submit" id="{{k.productcode}}" name = "{{k.productcode}}" value="{{k.productcode}}">{{k.productcode}}</button></td>
                             <td>{{k.linestatus}}</td>
                             <td>{{k.qtyreceived}}</td>
-                            <td><input type="checkbox" id="receive" name="clear" value="{{k.productcode}}"></td>
+                            <td><input type="checkbox" id="receive" name="clear" value="{{k.productcode}}" onclick="onlyOne(this)"></td>
                             <td><button  type ="submit" name = "execute" class ="btn btn-danger" style="font-size: 7px;">Execute</button></td>
                         </tr>
                         {% endfor %}
@@ -109,6 +112,13 @@
         {% endif %}
         {% csrf_token %}
     </body>
-    <script src="//cdn.datatables.net/1.12.1/js/jquery.dataTables.min.js"></script>
+    <script>
+        function onlyOne(checkbox) {
+            var checkboxes = document.getElementsByName('clear')
+            checkboxes.forEach((item) => {
+                if (item !== checkbox) item.checked = false
+            })
+        }
+    </script>
     <script src="{% static 'javascript/javascript.js' %}" type="text/javascript"></script> 
 </html>

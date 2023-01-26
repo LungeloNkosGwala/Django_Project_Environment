@@ -8,9 +8,11 @@
         
         {% include 'links_app/base.html' %}
         <br>
+        <div class="container" style="text-align: center; border-radius: 10px;
+        background-color:#eee;; box-shadow: 0 20px 35px rgba(20,0,20,0.1);
+        width:370px;margin: 0.1rem auto;"><h1 style="color: green;font-size: 30px;">Create ASN</h1></div>
+        <div class="container"><hr class="rounded" style="border-top: 8px solid #bbb;border-radius: 5px;width: 100%"></div>
         <div class="container">
-            <h4>Create ASN</h4>
-            <hr class="rounded" style="border-top: 8px solid #bbb;border-radius: 5px;width: 40%">
             <form method="post" action="#">
                 <label for="">SKU</label>
                 <input type="text" id="sku" name="productcode" placeholder="Scan Barcode." Required>
@@ -22,10 +24,10 @@
                 {% csrf_token %}
             </form>
         </div>
-        <div class="container">{% include 'links_app/message.html' %}</div>
+        <div class="container"><hr class="rounded" style="border-top: 8px solid #bbb;border-radius: 5px;width: 100%"></div>
+        {% include 'links_app/message.html' %}
+        <div class="container"><hr class="rounded" style="border-top: 8px solid #bbb;border-radius: 5px;width: 100%"></div>
         <div class="container">
-            <h4>Stock Order</h4>
-            <hr class="rounded" style="border-top: 8px solid #bbb;border-radius: 5px;width: 40%">
             <form action="#" method="post">
                 <button type ="submit" class ="btn btn-danger" name = "calculate" style="font-size: 10px;">Check Cost</button>
                 <br>
@@ -59,10 +61,10 @@
                     </form>
                     
                     {% empty %}
-                        <h2>No results found</h2>
+                        
                     {% endfor %}
                 </table>
-                <button onclick="alert('Your about you create Order')" type="submit" class="btn btn-primary" name="create">Create</button>
+                <button onclick="alert('Your about you create ASN')" type="submit" class="btn btn-primary" name="create">Create</button>
                 {% endblock %}
                 {% csrf_token %}
             </form>

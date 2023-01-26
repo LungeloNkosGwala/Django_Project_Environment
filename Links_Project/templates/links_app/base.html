@@ -4,9 +4,9 @@
 
 
 <div class="container">
-    <h1>Links Mini v1.1 </h1>
-    <p>Hi {{user_d}}, welcome to Links</p>
+    <p>Links | user: {{user_d}}</p>
 </div>
+<div class="container"><hr class="rounded" style="border-top: 8px solid #bbb;border-radius: 5px;width: 100%"></div>
 <div class = "container">
     <div class="dropdown">
         <button class="dropbtn">Inbound</button>
@@ -32,13 +32,11 @@
     <div class="dropdown">
         <button class="dropbtn">Outbound</button>
         <div class="dropdown-content">
-        <a href="#">Order Picking</a>
+        <a href="{% url 'user_picks' %}">Order Picking</a>
+        <a href="{% url 'pickstaging' %}">HUP Staging</a>
         <a href="#">Packing</a>
         <a href="#">Release</a>
-        <a href="#">Manual Allocation</a>
-        <a href="#">Order Cancel</a>
         <a href="{% url 'create_pickingslip' %}">Create Order</a>
-        <a href="#">Load Order</a>
         </div>
     </div>
     <div class="dropdown">
@@ -47,6 +45,7 @@
         <a href="#">Order Inquire</a>
         <a href="{% url 'asn_inquire' %}">ASN Inquire</a>
         <a href="{% url 'product_inquire' %}">Product Inquire</a>
+        <a href="{% url 'bin_inquire' %}">Bin Inquire</a>
         <a href="{% url 'transactions' %}">WorkFlow analyse</a>
         </div>
     </div>
@@ -56,14 +55,14 @@
         <a href="{% url 'binupdate' %}">Bin Location Update</a>
         <a href="{% url 'pmupdate' %}">Product Update</a>
         <a href="{% url 'pfep' %}">PFEP</a>
-        <a href="#">System Maintenance</a>
+        <a href="{% url 'base_system' %}">System Maintenance</a>
         <a href="{% url 'register' %}">Register User</a>
         </div>
     </div>
     <div class="dropdown">
         <button class="dropbtn">Reports</button>
         <div class="dropdown-content">
-        <a href="#">Inbound</a>
+        <a href="{% url 'rep_inbound' %}">Inbound</a>
         <a href="#">Inventory</a>
         <a href="#">Outbound</a>
         <a href="#">Sales&Stock</a>

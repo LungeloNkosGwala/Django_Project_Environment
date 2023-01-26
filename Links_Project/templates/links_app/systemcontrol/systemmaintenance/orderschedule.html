@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+{% load static %}
+{% include 'links_app/head.html' %}
+<body>
+
+
+    {% if user.is_authenticated %}
+        
+        {% include 'links_app/base.html' %}
+        <br>
+        <div class="container"><h4>System Maintenance</h4></div>
+
+        <div class="container">
+            <table width = "100%" border = "0">
+            
+                {% include 'links_app/systemcontrol/base_links.html' %}
+
+                    <td bgcolor = "#b5dcb3" height = "120" width = "60%">
+                        Order Schedule</br>
+
+
+                    </td>
+                    {% include 'links_app/systemcontrol/base_links1.html' %}
+                </tr>
+            
+            <table>
+        </div>
+
+        <div class="container">
+            <form method="post" action="#">
+                <button name="schedule">schedule</button>
+                <button name="reshuffle">reshuffle</button>
+                {% csrf_token %}
+            </form>
+        </div>
+        <div class = "container">
+            <div class = "col-md-6">
+                <form action="#" method="post">  
+                    <table border="1" class="table table-bordered" style="border-collapse: collapse; width: 70%;font-size: 8px">
+                        <thead>
+                            <th>Picker</th>
+                            <th>MezzA</th>
+                            <th>MezzB</th>
+                            <th>Pallet</th>
+                            <th>All_Picks</th>
+                            <th>Picked</th>
+                            <th>Per%</th>
+                            <th>Select</th>
+                            <th><button type="submit" name="distribute">Distribute</button></th>
+                        </thead>
+                        {% for k in df %}
+                        <tr>
+                            <td>{{k.index}}</td>
+                            <td>{{k.MezzA}}</td>
+                            <td>{{k.MezzB}}</td>
+                            <td>{{k.MezzR}}</td>
+                            <td>{{k.Sum}}</td>
+                            <td>{{k.Picks}}</td>
+                            <td>{{k.Per}}%</td>
+                            <td><input type="checkbox" name = "select" value="{{k.index}}" onclick="onlyOne(this)"></td>
+                        </tr>
+                        {% endfor %}
+                        {% csrf_token %}
+                    </table>
+                </form>
+            </div>
+        </div>
+
+        
+
+
+    {% else %}
+    <li><a class="navbar-link" href="{% url 'user_login' %}">Login</a></li>
+    <li><a class="navbar-link" href="{% url 'register' %}">Regsiter</a></li>
+    {% endif %}
+    {% csrf_token %}
+</body>
+
+<script>
+
+    function onlyOne(checkbox) {
+        var checkboxes = document.getElementsByName('select')
+        checkboxes.forEach((item) => {
+            if (item !== checkbox) item.checked = false
+        })
+    }
+
+</script>
+<script src="{% static 'javascript/javascript.js' %}" type="text/javascript"></script>
+
+</html>

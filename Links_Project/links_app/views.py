@@ -1,25 +1,19 @@
-from csv import unregister_dialect
-from email import message
-from poplib import POP3_PORT
-from xml.dom import INVALID_MODIFICATION_ERR
-from django.shortcuts import render, redirect
+from django.shortcuts import render
 from django.contrib.auth import authenticate, login,logout
-from django.contrib.auth.decorators import login_required,user_passes_test
 from django.http import HttpResponseRedirect, HttpResponse
 from django.urls import reverse
-from django.contrib.auth.decorators import login_required,user_passes_test
+from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.contrib.auth.forms import UserCreationForm
-from links_app.models import ProductMaster, Routing, AsnLines,Delivery,BinContent, Transactions,Interrim
-from django.db.models import Sum,Aggregate,Q,Max
+from links_app.models import ProductMaster, Routing, AsnLines,Delivery,BinContent, Transactions,Interrim,RouteCodes
+from links_app.models import AllocateCapacity,Customers,Orders,OrderLines,Employee,Orders,OrderManagement,OrderSchedule,AfterPickStaging
+from django.db.models import Sum,Aggregate,Q,Max,Count
 from django.contrib import messages
 from datetime import datetime
 from django import forms
 import pandas as pd
-from random import random
-from django.http import JsonResponse
-import json
 import plotly.express as px
+import xlwt
 
 # Create your views here.
 
@@ -27,7 +21,8 @@ asn_status = ["AsnCreated","DeliveryCreated","New","Inprogress","Closed","Comple
 product_status = ['Active',"Discontinued","Inactive","Supercession"]
 routing_status = ['AsnStaging',"BinRoute","StagingRoute","OrderStaging"]
 placeholder = ['ASN','ASNNO','ORDER','ORDERNO']
-linestatus = ["New","Inprogress","Closed","Damaged"]
+linestatus = ["New","Inprogress","Closed","Damaged","Picked",'Packed','Shipped',"BackOrder"]
+orderstatus = ['New','Allocated','Picking','PickStaging','Packing','Routecage',"Shipped"]
 
 def check_admin(user):
     return user.is_staff
@@ -121,8 +116,9 @@ def loadasn(request):
             stagingtype=routing_status[0]
             hu = placeholder[1]
             targetbin_1 = placeholder[0]
-            Routing.routing(stagingtype,hu,productcode,qty,targetbin_1)
-            return render(request,"links_app/inbound/loadasn.html",{"data":data})
+            Routing.routing(stagingtype,hu,productcode,qty,targetbin_1,user_d)
+            messages.warning(request, "Part successfully staged")
+            #return render(request,"links_app/inbound/loadasn.html",{"data":data})
 
     elif "create" in request.POST:
         data_1 = Routing.objects.filter(stagingtype=routing_status[0]).first()
@@ -155,7 +151,7 @@ def loadasn(request):
         productcode = request.POST['delete']
         Routing.objects.filter(productcode=productcode,stagingtype=routing_status[0]).delete()
         messages.warning(request, "Part successfully remove from staging")
-        return render(request,"links_app/inbound/loadasn.html",{"user_d":user_d,"data":data})
+        #return render(request,"links_app/inbound/loadasn.html",{"user_d":user_d,"data":data})
 
     else:
         pass
@@ -651,7 +647,7 @@ def create_route(request,productcode,user_d,hu):
 
 def putaway_hu(request,hu,productcode,qty,bin,sourceqty,remaining_qty,nw_qty,user_d,TRUE_FALSE):
     #Into Bin Content
-    BinContent.objects.filter(bin = bin).update(productcode=productcode, qty=nw_qty,full=TRUE_FALSE,route="FALSE")
+    BinContent.objects.filter(bin = bin).update(productcode=productcode, qty=nw_qty,avail_qty=nw_qty,full=TRUE_FALSE,route="FALSE")
 
 
     #Into WorkFlow
@@ -716,7 +712,7 @@ def putaway(request):
             return render(request,"links_app/inbound/putaway.html",{"user_d":user_d,"targetbin_1":targetbin_1,"hu":hu,"qty":qty}) 
     elif "hu" in request.POST and "productcode" in request.POST and "qty" in request.POST and "bin" in request.POST and "confirm" in request.POST and "type" in request.POST:
         hu = request.POST['hu']
-        qty = int(request.POST['qty'])
+        qty = request.POST['qty']
         productcode = request.POST['productcode']
         bin = request.POST['bin']
         verify = verify_PM(request,productcode)
@@ -752,8 +748,6 @@ def putaway(request):
         
             
 
-
-
 @login_required
 def pfep(request):
     user_d = request.user
@@ -784,6 +778,31 @@ def asn_inquire(request):
             sel_data = AsnLines.objects.all().filter(asnno=query)
             return render(request,"links_app/inquire/asn_inquire.html",{"user_d":user_d,"data":data,"sel_data":sel_data})
     return render(request,"links_app/inquire/asn_inquire.html",{"user_d":user_d})
+
+
+def bin_inquire(request):
+    user_d = request.user
+
+    if "bin" in request.GET:
+        query = request.GET.get("bin")
+        verify = BinContent.objects.filter(bin=query).first()
+
+        if verify is None:
+            return render(request,"links_app/inquire/bin_inquire.html",{"user_d":user_d})
+        else:
+            data = BinContent.objects.all().filter(bin=query)
+            return render(request,"links_app/inquire/bin_inquire.html",{"user_d":user_d,"data":data})
+    elif "productcode" in request.GET:
+        productcode = request.GET.get("productcode")
+
+        verify = verify_PM(request,productcode)
+        if verify is None:
+            return render(request,"links_app/inquire/bin_inquire.html",{"user_d":user_d})
+        else:
+            data1 = BinContent.objects.all().filter(productcode=productcode)
+            return render(request,"links_app/inquire/bin_inquire.html",{"user_d":user_d,"data1":data1})
+    return render(request,"links_app/inquire/bin_inquire.html",{"user_d":user_d})
+
 
 
 
@@ -820,29 +839,117 @@ def transactions(request):
     return render(request,"links_app/inquire/transactions.html")
 
 
+def base_system(request):
+    return render(request,"links_app/systemcontrol/base_system.html")
+
+def routecode_update(request):
+    if "upload_pm" in request.POST:
+        col_no = 4
+        df = uploader(request, col_no)
+        for i in df.iterrows():
+            RouteCodes.objects.filter(routecode = i[1][0]).delete()
+            el = RouteCodes.objects.create(routecode=i[1][0])
+            el.country = i[1][1]
+            el.province = i[1][2]
+            el.area=i[1][3]
+            el.save()
+
+        messages.warning(request, "Route Codes succesfully loaded")
+
+    form = CsvImportForm()
+    data = {'form':form}
+
+    return render(request, "links_app/systemcontrol/systemmaintenance/routecode_update.html", data)
+
+
+def cust_routecode(request):
+    data = RouteCodes.objects.all()
+    sel = ["cust_name","accountno","street","surburb",'city','postalcode','emailad','cellno','telno','routecode']
+    if sel[0] in request.POST and sel[2] in request.POST and sel[4] in request.POST and sel[6] in request.POST and sel[9] in request.POST and "create" in request.POST:
+        verify = Customers.objects.filter().first()
+        if verify is None:
+            intial = 100
+        else:
+            intial = int(Customers.objects.all().last().customercode)+1
+
+        verify = Customers.objects.filter(Q(emailaddress=request.POST[sel[6]])|Q(account=int(request.POST[sel[1]]))).first()
+        if verify is None:
+            el = Customers.objects.create(customercode=intial,account=int(request.POST[sel[1]]),emailaddress=request.POST[sel[6]])
+            el.address = str(request.POST[sel[2]])+"/"+str(request.POST[sel[3]])+"/"+str(request.POST[sel[4]])+"/" +str(request.POST[sel[5]])
+            el.cellnumber = str(request.POST[sel[7]])
+            el.telephonenumber = str(request.POST[sel[8]])
+            el.routecode = int(request.POST[sel[9]])
+            el.customername = str(request.POST[sel[0]])
+            el.customertype='Local'
+            el.save()
+            print("Successlly excuted")
+            messages.warning(request,"Customer details Entered successfully")
+            return render(request, "links_app/systemcontrol/systemmaintenance/cust_routecode.html",{"data":data})
+        else:
+            messages.warning(request,"Email or Account is already in Use")
+            return render(request, "links_app/systemcontrol/systemmaintenance/cust_routecode.html",{"data":data})
+
+
+    return render(request, "links_app/systemcontrol/systemmaintenance/cust_routecode.html",{"data":data})
+
+def loadorderlines(request,orderno,user_d):
+    for i in Routing.objects.all().filter(stagingtype=routing_status[3],route_user=str(user_d)):
+        el = OrderLines.objects.create(productcode = i.productcode)
+        el.orderno = orderno
+        el.qtyordered = i.qty
+        el.linestatus = linestatus[0]
+        el.save()
+
 def create_pickingslip(request):
-    data = Routing.objects.all().filter(stagingtype=routing_status[3])
     user_d = request.user
+    data = Routing.objects.all().filter(stagingtype=routing_status[3],route_user=str(user_d))
+    Cust = Customers.objects.all()
     if "search" in request.GET:
         query = request.GET.get('asnno')
         productcode=ProductMaster.objects.filter(Q(productcode__icontains=query))
-        return render(request,"links_app/outbound/create_pickingslip.html",{"user_d":user_d,"productcode":productcode,"data":data})
+        return render(request,"links_app/outbound/create_pickingslip.html",{"user_d":user_d,"productcode":productcode,"data":data,"Cust":Cust})
     elif "stage" in request.GET and "sel" in request.GET and "qty" in request.GET:
-        qty = int(request.GET.get('qty'))
-        productcode = request.GET.get("sel")
-        stagingtype=routing_status[3]
-        hu = placeholder[3]
-        targetbin_1 = placeholder[2]
-        Routing.routing(stagingtype,hu,productcode,qty,targetbin_1)
-        messages.warning(request,"Line staged successfully")
-        return render(request,"links_app/outbound/create_pickingslip.html",{"user_d":user_d,"data":data})
+        if int(Routing.objects.filter(stagingtype=routing_status[3],route_user=str(user_d)).count()) == 20:
+            messages.warning(request,"You can only have 20 productcodes per Order, please submit and load another Order")
+            return render(request,"links_app/outbound/create_pickingslip.html",{"user_d":user_d,"data":data,"Cust":Cust})
+        else:
+            qty = int(request.GET.get('qty'))
+            productcode = request.GET.get("sel")
+            stagingtype=routing_status[3]
+            hu = placeholder[3]
+            targetbin_1 = placeholder[2]
+            Routing.routing(stagingtype,hu,productcode,qty,targetbin_1,user_d)
+
+            messages.warning(request,"Line staged successfully")
+            return render(request,"links_app/outbound/create_pickingslip.html",{"user_d":user_d,"data":data,"Cust":Cust})
     elif "execute" in request.GET and "selected" in request.GET:
         productcode = request.GET.get("selected")
-        Routing.objects.filter(productcode=productcode,stagingtype=routing_status[3]).delete()
+        Routing.objects.filter(productcode=productcode,stagingtype=routing_status[3],route_user=str(user_d)).delete()
         messages.warning(request, "Part successfully remove from staging")
-        return render(request,"links_app/outbound/create_pickingslip.html",{"user_d":user_d,"data":data})
+        return render(request,"links_app/outbound/create_pickingslip.html",{"user_d":user_d,"data":data,"Cust":Cust})
 
-    return render(request,"links_app/outbound/create_pickingslip.html",{"user_d":user_d,"data":data})
+    elif "create" in request.GET:
+        verify = Routing.objects.filter(stagingtype=routing_status[3],route_user=str(user_d)).first()
+        if verify is None:
+            messages.warning(request, "There are not productcodes staged to order creations")
+            return render(request,"links_app/outbound/create_pickingslip.html",{"user_d":user_d,"data":data,"Cust":Cust})
+        else:
+            customercode = request.GET.get("customercode")
+            routecode = int(customercode[3:])
+            customercode = int(customercode[:3])
+            ordertype = Customers.objects.get(customercode=customercode).customertype
+            order_status = orderstatus[0]
+            processing_info = 'NormalOrder'
+            linesordered = int(Routing.objects.filter(stagingtype=routing_status[3],route_user=str(user_d)).count())
+            qtyordered = int(Routing.objects.filter(stagingtype=routing_status[3],route_user=str(user_d)).aggregate(Sum('qty'))["qty__sum"])
+            orderno = Orders.loadorder(ordertype,customercode,routecode,linesordered,qtyordered,order_status,processing_info)
+            loadorderlines(request,orderno,user_d)
+            Routing.objects.filter(stagingtype=routing_status[3],route_user=str(user_d)).delete()
+            messages.warning(request, "Orderno has been successfully been created")
+            return render(request,"links_app/outbound/create_pickingslip.html",{"user_d":user_d,"data":data,"Cust":Cust})
+
+
+    return render(request,"links_app/outbound/create_pickingslip.html",{"user_d":user_d,"data":data,"Cust":Cust})
 
 
 def product_inquire(request):
@@ -851,7 +958,7 @@ def product_inquire(request):
         productcode= request.POST['productcode']
         verify = verify_PM(request,productcode)
         if verify is None:
-            messages.warning(request,"links_app/inquire/product_inquire.html",{"user_d":user_d})
+            messages.warning(request,"productcode doesn't exist")
             return render(request,"links_app/inquire/product_inquire.html",{"user_d":user_d})
         else:
             data = BinContent.objects.filter(productcode=productcode).values('productcode').annotate(total = Sum('qty'))
@@ -861,12 +968,67 @@ def product_inquire(request):
     return render(request,"links_app/inquire/product_inquire.html",{"user_d":user_d})
 
 
+def rep_inbound(request):
+    user_d = request.user
+    if "download" in request.GET:
+        query = request.GET.get('type')
+        sd = request.GET.get("from")
+        ed = request.GET.get("to")
+
+
+        if ed == "" and sd == "":
+            ed = "2060-12-31"
+            sd = "2020-12-31"
+        elif ed == "":
+            ed = "2060-12-31"
+        elif sd == "":
+            sd = "2020-12-31"
+        else:
+            pass
+
+        response = HttpResponse(content_type='application/ms-excel')
+        response['Content-Disposition'] = 'attachment; filename="{}.xls"'.format(query)
+
+        wb = xlwt.Workbook(encoding='utf-8')
+        ws = wb.add_sheet(query) # this will make a sheet named Users Data
+
+        # Sheet header, first row
+        row_num = 0
+
+        font_style = xlwt.XFStyle()
+        font_style.font.bold = True
+
+        columns = ['WorkflowType', 'Productcode', 'Qty', 'Targetbin', 'HoldingUnit','user_transactions']
+
+        for col_num in range(len(columns)):
+            ws.write(row_num, col_num, columns[col_num], font_style) # at 0 row 0 column 
+
+
+        # Sheet body, remaining rows
+        font_style = xlwt.XFStyle()
+
+        rows = list(Transactions.objects.all().filter(workflowtype=query,transactiondate__range=[sd, ed]).values_list('workflowtype', 'productcode', 'qty', 'targetbin',"holdingunit","user_transactions"))
+        
+
+
+                  
+        for row in rows:
+            row_num += 1
+            for col_num in range(len(row)):
+                ws.write(row_num, col_num, row[col_num], font_style)
+
+        
+        wb.save(response)
+
+        return response
+    return render(request,"links_app/reports/rep_inbound.html",{"user_d":user_d})
 
 
 def analytics(request):
     user_d = request.user
     data = Transactions.objects.filter(workflowtype="Receiving").values("productcode").annotate(total = Sum('qty'))
     data = BinContent.objects.filter().values('productcode').annotate(total = Sum('qty'))
+    print(data)
 
     fig = px.bar(
         x = [c.get('productcode') for c in data],
@@ -883,6 +1045,963 @@ def analytics(request):
     return render(request,"links_app/reports/analytics.html",{"user_d":user_d,"data":data,"chart":chart})
 
 
-"""def get_data(request, *args,**kwargs):
-    data = Transactions.objects.filter(workflowtype="Receiving").values("productcode").annotate(total = Sum('qty'))
-    return JsonResponse"""
+dept = {"0":"Select Dept",'1': 'Outbound', '2': 'Inbound', '3': 'Inventory', '4': 'Technical'}
+area = {"0":"Select Area",'1': 'Picker', '2': 'Packer', '3': 'Shipper', '4': 'Receiver', '5': 'Binner', '6': 'Counter', '7': 'Technical',"8":"PalletP"}
+def user_management(request):
+    user_d = request.user
+    if "search" in request.GET:
+        query = request.GET.get('asnno')
+        employees=User.objects.filter(Q(username__icontains=query))
+        return render(request,"links_app/systemcontrol/systemmaintenance/user_management.html",{"user_d":user_d,'employees':employees})
+    elif "select" in request.GET and "sel" in request.GET:
+        sel_user = request.GET.get("sel")
+        user_s = int(User.objects.get(username=str(sel_user)).id)
+        user_s = Employee.objects.all().filter(user_id=user_s)
+        return render(request,"links_app/systemcontrol/systemmaintenance/user_management.html",{"user_d":user_d,"user_s":user_s,"sel_user":sel_user,"dept":dept,"area":area})
+    elif "update" in request.GET and "dept" in request.GET and "area" in request.GET:
+        selected_user = request.GET.get("selected_user")
+        sel_dept = request.GET.get("dept")
+        sel_area = request.GET.get("area")
+        
+        if selected_user is None or sel_dept == "Select Dept" or sel_area == "Select Area" or selected_user == "Lungelo":
+            messages.warning(request,"Invalid Selection, check your input correctly")
+        else:
+            user_sel = int(User.objects.get(username=selected_user).id)
+            verify = Employee.objects.filter(user_id=user_sel).first()
+            if verify is None:
+                el = Employee.objects.create(user_id=user_sel)
+                el.department = sel_dept
+                el.area = sel_area
+                el.save()
+                messages.warning(request,"User details updated successfully")
+            else:
+                Employee.objects.filter(user_id=user_sel).update(department=sel_dept,area=sel_area)
+                messages.warning(request,"User details updated successfully")
+
+    return render(request,"links_app/systemcontrol/systemmaintenance/user_management.html",{"user_d":user_d})
+    
+
+def get_pickers(request):
+    #Function to allocate users to picksbins
+    picker_list = list(Employee.objects.filter(department="Outbound",area="Picker").values_list('user_id'))
+    
+    p_id = []
+    p_name = []
+
+    for i in picker_list:
+        p_id.append(i[0])
+        a = str(User.objects.get(id=i[0]).username)
+        p_name.append(a)
+
+    # Get Pallet Pickers
+    pallet_list = list(Employee.objects.filter(department="Outbound",area="PalletP").values_list('user_id'))
+
+    pp_id = []
+    pp_name = []
+    for i in pallet_list:
+        pp_id.append(i[0])
+        a = str(User.objects.get(id=i[0]).username)
+        pp_name.append(a)
+
+    return p_id,p_name,pp_id,pp_name
+
+
+def get_bins(request):
+    pb = ["pickbin1",'pickbin2','pickbin3']
+    
+    bins = []
+    binss = []
+    sequence = []
+    area = []
+    r = 1
+    for t in pb:
+        call = list(OrderManagement.objects.filter(orderedqty__gt=0).values_list(t))
+        if call is None:
+            pass
+        else:
+            for i in call:
+                if i[0] == "NA":
+                    pass
+                else:
+                    bins.append(i[0])
+                    binss.append(i[0])
+                    print(i[0])
+                    a = int(BinContent.objects.get(bin=i[0]).binsequence)
+                    b = str(BinContent.objects.get(bin=i[0]).area)
+                    sequence.append(a)
+                    area.append(b)
+        binss.append("Stop_"+str(r))
+        r= r+1
+    
+    res = []
+    for i in binss:
+        if i not in res:
+            res.append(i)
+
+    df = {"area":area,"bins":bins,"sequence":sequence}
+    df = pd.DataFrame(df, columns={"area","bins",'sequence'})
+
+    #Pallet Bins
+    pallet = df[df['area']=="Pallet"]
+
+    mezz = df[~df.area.isin(['Pallet'])]
+
+    mezz.drop_duplicates(subset="bins", keep ='last', inplace=True)
+
+    palletl = list(pallet['bins'])
+
+    res = [i for i in res if i not in palletl]
+
+    x1 = res.index("Stop_1")
+    bin1 = res[:x1]
+    x2 = res.index("Stop_2")
+    bin2 = res[x1+1:x2]
+    x3 = res.index("Stop_3")
+    bin3 = res[x2+1:x3]
+
+    
+
+    return mezz, pallet,bin1,bin2,bin3,res
+
+def pallet_allocate(request,pallet,pp_id,pp_name):
+    bin1 = list(pallet['bins'])
+    for i in pp_name:
+        for t in bin1:
+            OrderManagement.objects.filter(pickbin1=t,orderedqty__gt=0).update(allocated_user1=i)
+
+    for i in pp_name:
+        for t in bin1:
+            OrderManagement.objects.filter(pickbin2=t,orderedqty__gt=0).update(allocated_user1=i)
+
+    for i in pp_name:
+        for t in bin1:
+            OrderManagement.objects.filter(pickbin3=t,orderedqty__gt=0).update(allocated_user1=i)
+
+
+
+
+def sequence_structure(request,mezz,p_name):
+    a = list(mezz['sequence'])
+    a.sort()
+    a = pd.DataFrame(a,columns={"Sequence"})
+    total = a['Sequence'].sum()
+    a['Per'] = round(a['Sequence']/total*100).astype(int)
+    a['Cata'] = round(a['Per']/a["Per"].iloc[-1],2)
+    pic = len(p_name)
+    lis = []
+    x = 1
+    while x < pic:
+        lis.append(x/pic)
+        x=x+1
+    lis.append(1.01)
+
+
+    pack = []
+    
+    for i in lis:
+        y = a[a['Cata']<i]
+        pack.append(list(y['Sequence']))
+        a = a[~a['Sequence'].isin(y['Sequence'])]
+
+
+    pack = pd.DataFrame(pack)
+    pack = pack.transpose()
+
+    pack.columns = p_name
+
+    pack = pack.fillna(0)
+    pack = pack.astype('int')
+
+    return pack
+
+def user_allocate(request,pack,bin1,bin2,bin3,p_name,mezz):
+    
+    for i in bin1:
+        print(i)
+        for t in p_name:
+            print(t)
+            for x in pack[t]:
+                if x == 0:
+                    pass
+                else:
+                    if i == mezz[mezz['sequence']==x]['bins'].values[0]:
+                        print(t)
+                        OrderManagement.objects.filter(pickbin1=i,orderedqty__gt=0).update(allocated_user1=t)
+                    else:
+                        pass
+
+    for i in bin2:
+        print(i)
+        for t in p_name:
+            print(t)
+            for x in pack[t]:
+                if x == 0:
+                    pass
+                else:
+                    if i == mezz[mezz['sequence']==x]['bins'].values[0]:
+                        print(t)
+                        OrderManagement.objects.filter(pickbin2=i,orderedqty__gt=0).update(allocated_user2=t)
+                    else:
+                        pass
+
+    for i in bin3:
+        print(i)
+        for t in p_name:
+            print(t)
+            for x in pack[t]:
+                if x == 0:
+                    pass
+                else:
+                    if i == mezz[mezz['sequence']==x]['bins'].values[0]:
+                        print(t)
+                        OrderManagement.objects.filter(pickbin3=i,orderedqty__gt=0).update(allocated_user3=t)
+                    else:
+                        pass
+            #OrderManagement.objects.filter(pickbin1=i,orderedqty__gt=0).update()
+    
+
+def bin_selection(request,productcode, qty):
+    bins = list(BinContent.objects.filter(productcode=productcode).values_list("bin","avail_qty"))
+
+    #Transfer list
+    bin_picks = []
+    pickqty = []
+
+    #Processing list
+    b = []
+    c = []
+
+    for i in bins:
+        b.append(i[0])
+        c.append(i[1])
+    d = {'Bin':b,'qty':c}
+    df = pd.DataFrame(d)
+
+    while qty > 0:
+        def closest(c, qty):
+            return c[min(range(len(c)), key = lambda i: abs(c[i]-qty))]
+        clos = closest(c, qty)
+ 
+
+        bin_picks.append(b[c.index(clos)])
+
+        if clos < qty:
+            pickqty.append(clos)
+        else:
+            pickqty.append(qty)
+
+        b.remove(b[c.index(clos)])
+        c.remove(clos)
+        qty = qty - clos
+
+    
+        if qty < 0 or qty == 0 or len(c) == 0:
+            break
+        else:
+            continue
+
+    return bin_picks, pickqty
+    
+def update_allocate(request):
+    verify = OrderManagement.objects.filter(status1=linestatus[7]).first()
+
+    #Back Orders
+    if verify is None:
+        pass
+    else:
+        BO =OrderManagement.objects.all().filter(status1=linestatus[7])
+        x = len(BO)
+        y = 0
+        while x > 0:
+            productcode =BO[y].productcode
+            orderno = BO[y].orderno
+            OrderLines.objects.filter(orderno=orderno, productcode=productcode).update(linestatus=linestatus[7])
+            OrderManagement.clear_positions(productcode,orderno)
+            y = y + 1
+            x = x - 1
+
+
+    verify =  OrderManagement.objects.filter(status1=linestatus[4]).first()
+
+    if verify is None:
+        pass
+    else:
+        PC = OrderManagement.objects.all().filter(status1=linestatus[4])
+        x = len(PC)
+        y = 0
+        while x > 0:
+            productcode = PC[0].productcode
+            orderno = PC[0].orderno
+            OrderManagement.clear_positions(productcode,orderno)
+            y = y + 1
+            x = x - 1
+
+    unallocationlist = list(OrderManagement.objects.filter(allocated=True).values_list('station', flat=True).distinct().order_by("id"))
+    unique_station = []
+    for i in unallocationlist:
+        if i not in unique_station:
+            unique_station.append(i)
+    
+    for i in unique_station:
+        pos = int(OrderManagement.objects.filter(station=i,orderedqty__gt=0).count())
+        alloc = int(OrderManagement.objects.filter(station=i,allocated=True).count())
+        
+        if pos == 0 and alloc > 0:
+            OrderManagement.objects.filter(station=i).update(allocated=False)
+        else:
+            pass
+
+def load_order(request,orderlist, unique_station):
+    x = len(unique_station)
+    y = 0
+    a = len(orderlist)
+    while y < a:
+        next_all = OrderLines.objects.filter(orderno=orderlist[y])
+        s = 1
+        for c in next_all:
+            verify = BinContent.objects.filter(productcode=c.productcode).first()
+            if verify is None:
+                qty = 0
+                status = linestatus[7]
+                bin_picks=["NA",'NA','NA']
+                pickqty=[0,0,0]
+            else:
+                qty = OrderLines.objects.filter(productcode=c.productcode,orderno=orderlist[y]).values('productcode').annotate(total = Sum('qtyordered'))
+                av_qty = BinContent.objects.filter(productcode=c.productcode).values('productcode').annotate(total = Sum('qty'))
+                av_qty = int(av_qty[0].get('total'))
+                qty = int(qty[0].get("total"))
+                status = linestatus[0]
+                productcode = c.productcode
+                bin_picks,pickqty = bin_selection(request,productcode,qty)
+                o = 0
+                if len(bin_picks) == 1:
+                    bin_picks.append("NA")
+                    bin_picks.append("NA")
+                    pickqty.append(o)
+                    pickqty.append(o)
+                elif len(bin_picks)==2:
+                    bin_picks.append("NA")
+                    pickqty.append(o)
+                else:
+                    pass
+            
+            OrderManagement.objects.filter(station=unique_station[y],position=s).update(orderno =orderlist[y], 
+                                                                                        productcode=c.productcode, 
+                                                                                        orderedqty=c.qtyordered,
+                                                                                        availableqty=av_qty,
+                                                                                        status1=status,
+                                                                                        status2=status,
+                                                                                        status3=status,
+                                                                                        pickbin1=bin_picks[0],
+                                                                                        pickbin2 = bin_picks[1],
+                                                                                        pickbin3=bin_picks[2],
+                                                                                        pickqty1=pickqty[0],
+                                                                                        pickqty2=pickqty[1],
+                                                                                        pickqty3=pickqty[2])
+
+            qty_left = c.qtyordered - pickqty[0] -pickqty[1]-pickqty[2]
+            OrderManagement.objects.filter(station=unique_station[y]).update(allocated=True)
+            OrderManagement.objects.filter(orderno =orderlist[y],productcode=c.productcode,).update(unallocatedqty=qty_left)
+            Orders.objects.filter(orderno=orderlist[y]).update(orderstatus=orderstatus[1])
+
+            s = s + 1
+        y = y + 1
+        if y < x:
+            continue
+        else:
+            break
+
+
+
+def ordermanagement(request):
+    user_d = request.user
+    data = OrderManagement.objects.all().filter(orderedqty__gt=0)
+    if "schedule" in request.POST:
+
+        update_allocate(request)
+
+        verify = Orders.objects.filter(orderstatus=orderstatus[0]).first()
+        if verify is None:
+            messages.warning(request,"The is not available Orders to allocate")
+            return render(request,"links_app/systemcontrol/systemmaintenance/ordermanagement.html",{"user_d":user_d,"data":data})
+        else:
+            verify = OrderManagement.objects.filter(allocated=False).first()
+            if verify is None:
+                messages.warning(request,"Allocation capacity maxed, please waiting a few mintues")
+                return render(request,"links_app/systemcontrol/systemmaintenance/ordermanagement.html",{"user_d":user_d,"data":data})
+            else:
+                orderlist = list(Orders.objects.filter(orderstatus=orderstatus[0]).values_list('orderno', flat=True).distinct().order_by("id"))
+                allocationlist = list(OrderManagement.objects.filter(allocated=False).values_list('station', flat=True).distinct().order_by("id"))
+                
+                unique_station = []
+                for i in allocationlist:
+                    if i not in unique_station:
+                        unique_station.append(i)
+                
+                load_order(request,orderlist, unique_station)
+
+                p_id,p_name,pp_id,pp_name = get_pickers(request)
+                mezz, pallet,bin1,bin2,bin3,res = get_bins(request)
+                pallet_allocate(request,pallet,pp_id,pp_name)
+                if len(res) == 3:
+                    return render(request,"links_app/systemcontrol/systemmaintenance/ordermanagement.html",{"user_d":user_d,"data":data})
+                else:
+                    pack = sequence_structure(request,mezz,p_name)
+                    user_allocate(request,pack,bin1,bin2,bin3,p_name,mezz)
+
+
+                return render(request,"links_app/systemcontrol/systemmaintenance/ordermanagement.html",{"user_d":user_d,"data":data})
+
+
+    return render(request,"links_app/systemcontrol/systemmaintenance/ordermanagement.html",{"user_d":user_d,"data":data})
+
+def allocationcapacity(request):
+    user_d = request.user
+    if "upload_pm" in request.POST:
+        col_no = 3
+        df = uploader(request, col_no)
+        for i in df.iterrows():
+            AllocateCapacity.objects.filter(station = i[1][0]).delete()
+            el = AllocateCapacity.objects.create(station=i[1][0])
+            el.active = i[1][1]
+            el.station_type = i[1][2]
+            el.save()
+
+        messages.warning(request, "allocated Capacity successfully updated")
+
+    form = CsvImportForm()
+    data = {'form':form,"user_d":user_d}
+    return render(request,"links_app/systemcontrol/systemmaintenance/allocationcapacity.html",data)
+
+
+
+def orderschedule(request):
+    user_d = request.user
+    df = no_of_picks(request)
+    if "schedule" in request.POST:
+        allocated_orders = orderSlot(request)
+        newOrderRequest(request,allocated_orders)
+        p_id,p_name,pp_id,pp_name=get_pickers(request)
+        user_slot(request,p_id,p_name,pp_id,pp_name)
+    elif "distribute" in request.POST and "select" in request.POST:
+        select = request.POST['select']
+        distribute_picks(request,select)
+    else:
+        pass
+    return render(request,"links_app/systemcontrol/systemmaintenance/orderschedule.html",{"user_d":user_d,"df":df})
+
+
+def orderSlot(request):
+    orderList = list(Orders.objects.filter(orderstatus="New").values_list('orderno', flat=True).distinct().order_by("id"))
+
+    unique_orders = []
+    for i in orderList:
+        if i not in unique_orders:
+            unique_orders.append(i)
+    
+    station_list = list(AllocateCapacity.objects.filter(orderno="", active='TRUE',station_type="Normal").values_list("station",flat=True).distinct().order_by("id"))
+    x = len(station_list)
+    y = len(unique_orders)
+
+    allocated_orders = []
+    a = 0
+    while x > 0:
+        if y == 0:
+            break
+        else:
+            AllocateCapacity.objects.filter(station=station_list[0]).update(orderno=unique_orders[0])
+            allocated_orders.append(unique_orders[0])
+            station_list.remove(station_list[0])
+            unique_orders.remove(unique_orders[0])
+            x = x - 1
+            y = y - 1
+
+    return allocated_orders
+
+
+def newOrderRequest(request,allocated_orders):
+    #list view of new orders
+    #orderList = list(Orders.objects.filter(orderstatus="New").values_list('orderno', flat=True).distinct().order_by("id"))
+    for order in allocated_orders:
+        #get list of productcode within orderno as well as qty ordered
+        item = list(OrderLines.objects.filter(orderno=order).values_list('productcode', "qtyordered"))
+        itemList = []
+        qtyList = []
+
+        for i in item:
+            itemList.append(i[0])
+            qtyList.append(i[1])
+
+        x = 0
+        for t in itemList:
+            verify = BinContent.objects.filter(productcode=t).first()
+            if verify is None:
+                #back order Updated
+                OrderLines.objects.filter(orderno=order,productcode=t).update(linestatus='BackOrder')
+            else:
+                av_qty = BinContent.objects.filter(productcode=t).values('productcode').annotate(total = Sum('qty'))
+                av_qty = int(av_qty[0].get('total'))
+            
+                productcode = t
+                qty = qtyList[x]
+
+                un_qty = av_qty - qty
+                if un_qty > 0:
+                    un_qty = 0
+                else:
+                    un_qty = un_qty*-1
+
+                x = x + 1
+
+                bin_picks, pickqty = bin_selection(request,productcode, qty)
+
+                print(bin_picks)
+                print(pickqty)
+
+                y = 0
+                for f  in bin_picks:
+                    sel_bin = f
+                    sel_qty = pickqty[y]
+                    OrderSchedule.loadNewLine(order,sel_bin, sel_qty,productcode,qty,av_qty,un_qty)
+                    y = y +1
+        Orders.objects.filter(orderno=order).update(orderstatus="Allocated")
+
+
+def user_slot(request,p_id,p_name,pp_id,pp_name):
+    binList = list(OrderSchedule.objects.filter(status="Allocated",allocated_user="").values_list('allocated_bin', flat=True).distinct().order_by("id"))
+    
+    seqs = []
+    area = []
+    for binn in binList:
+        a = BinContent.objects.get(bin=binn).picksequenece
+        b = BinContent.objects.get(bin=binn).area
+
+        seqs.append(a)
+        area.append(b)
+
+    df = {"area":area,"bins":binList,"sequence":seqs}
+    df = pd.DataFrame(df, columns={"area","bins",'sequence'})
+
+    place = list(df['area'].unique())
+
+
+    for area_r in place:
+        seq = list(df[df['area']==area_r]['sequence'])
+
+        if area_r == "Pallet":
+            p = pp_name
+        else:
+            p = p_name
+
+        seq.sort()
+
+
+        t = round(len(seq)/len(p),0)
+        if t == 0 or t== 0.0:
+            t = 1
+        else:
+            pass
+
+        for i in p:
+            x = 0
+            while x < t:
+                if seq == []:
+                    break
+                else:
+                    print(seq[0])
+                    binnn = BinContent.objects.get(area=area_r,picksequenece=seq[0]).bin
+                    OrderSchedule.objects.filter(allocated_bin=binnn).update(allocated_user=i)
+                    seq.remove(seq[0])
+                    x = x +1
+
+        if seq == []:
+            pass
+        else:
+            for i in seq:
+                binnn = BinContent.objects.get(area=area_r,picksequenece=i).bin
+                OrderSchedule.objects.filter(allocated_bin=binnn).update(allocated_user=p[-1])
+
+
+def no_of_picks(request):
+    pickers = []
+    bin = []
+
+    verify = OrderSchedule.objects.filter().first()
+    if verify is None:
+        df = []
+    else:
+        data = OrderSchedule.objects.all()
+        for i in data:
+            pickers.append(i.allocated_user)
+            #a = BinContent.objects.get(i.allocated_bin).area
+            bin.append(i.allocated_bin)
+
+        df = {"pickers":pickers,"bin":bin}
+        dff = pd.DataFrame(df,columns={"pickers","bin"})
+
+        dff['Area'] = "Mezz"+dff['bin'].str[:1]
+
+        dff = pd.pivot_table(dff, index=['pickers'], columns='Area', values='Area', aggfunc='count').rename_axis(index=None, columns=None)
+
+
+        dff.reset_index(inplace=True)
+        dff.fillna(0, inplace=True)
+        col = list(dff.columns)
+
+        dff['Sum'] = dff[col].sum(numeric_only=True,axis=1)
+        
+
+        count = len(col)
+
+        dff.iloc[:, 1:count] = dff.iloc[:, 1:count].astype(int)
+
+        dff['Sum'] = dff['Sum'].astype(int)
+
+        pickers = list(dff['index'].unique())
+
+        picks = []
+        for i in pickers:
+            a = OrderSchedule.objects.filter(Q(status="Picked")|Q(status="PickStaging"),allocated_user=i).count()
+            picks.append(a)
+        
+
+        dff['Picks'] = picks
+        
+        dff['Per'] = round(dff['Picks']/dff['Sum']*100,0)
+
+        df = dff.to_dict('records')
+    return df
+
+
+def distribute_picks(request,select):
+
+    if select == "":
+        pass
+    else:
+        verify = OrderSchedule.objects.filter(allocated_user=select,status="Allocated").first()
+        if verify is None:
+            pass
+        else:
+            data = OrderSchedule.objects.all().filter(allocated_user=select,status="Allocated")
+
+
+            order = []
+            product = []
+            binn = []
+
+            for i in data:
+                order.append(i.orderno)
+                product.append(i.productcode)
+                binn.append(i.allocated_bin)
+
+
+            df = {"order":order,"binn":binn,"productcode":product}
+            dff = pd.DataFrame(df,columns= {'order',"binn","productcode"})
+
+            dff['id'] = dff['order'] + dff['binn']
+
+            idlist = list(dff['id'])
+
+            avail_users = list(OrderSchedule.objects.filter(Q(status="Allocated")|Q(status="Picked")).values_list('allocated_user', flat=True))
+
+            all_users = []
+            for i in avail_users:
+                if i not in all_users:
+                    all_users.append(i)
+
+            all_users.remove(select)
+
+            t = round(len(data)/len(all_users),0)
+            if t == 0 or t== 0.0:
+                t = 1
+            else:
+                pass
+
+            for i in all_users:
+                x = 0
+                while x < t:
+                    if idlist == []:
+                        break
+                    else:
+                        idlist[0]
+                        o = dff[dff['id']==idlist[0]]['order'].values[0]
+                        pc = dff[dff['id']==idlist[0]]['productcode'].values[0]
+                        b = dff[dff['id']==idlist[0]]['binn'].values[0]
+                        OrderSchedule.objects.filter(orderno=o,productcode=pc,allocated_bin=b).update(allocated_user=i)
+                        idlist.remove(idlist[0])
+                        print(idlist)
+
+                        x =x +1
+
+            if idlist == []:
+                pass
+            else:
+                for i in idlist:
+                    o = dff[dff['id']==i]['order'].values[0]
+                    pc = dff[dff['id']==i]['productcode'].values[0]
+                    b = dff[dff['id']==i]['binn'].values[0]
+                    OrderSchedule.objects.filter(orderno=o,productcode=pc,allocated_bin=b).update(allocated_user=all_users[-1])
+
+      
+def user_picks(request):
+    user_d = request.user
+    verify = OrderSchedule.objects.filter(allocated_user=str(user_d),status="Allocated").first()
+    if verify is None:
+        data = {"orderno":0,"productcode":0,"allocated_bin_qty":0}
+    else:
+        data = OrderSchedule.objects.all().filter(allocated_user=str(user_d),status="Allocated")
+        data = data[0]
+
+    r = ['submit','hu','productcode','bin','qty',"type"]
+
+    if r[0] in request.POST  and r[1] in request.POST and r[2] in request.POST and r[3] in request.POST and r[4]  in request.POST and r[5] in request.POST:
+        req_type = request.POST[r[5]]
+
+        if req_type == "nostock":
+            pass
+        elif req_type == "wrongstock":
+            pass
+        elif req_type == "good":
+            hu = request.POST[r[1]]
+            hu = verify_hu(request,hu)
+            if hu == "used":
+                messages.warning(request, "HU either in currently in use and cannot be re-used")
+            elif hu == "Invalid":
+                messages.warning(request, "HU enter is not valid")
+            else:
+                productcode = request.POST[r[2]]
+                verify = verify_PM(request,productcode)
+                if verify is None:
+                    messages.warning(request, "Productcode doesn't exist")
+                else:
+                    binn = request.POST[r[3]]
+                    t = request.POST[r[0]]
+                    qty = int(request.POST[r[4]])
+
+                    order = t.partition('|')[0]
+                    t = t.partition('|')[2]
+                    req_qty = int(t.partition('_')[0])
+                    req_bin = t.partition('_')[2]
+
+                    if binn != req_bin:
+                        messages.warning(request, "Incorrect targetbin")
+                    else:
+                        if req_qty < qty:
+                            messages.warning(request, "You picking more than the required qty")
+                        else:
+                            OrderSchedule.newPickUpdate(order,hu,binn,productcode,qty,user_d)
+
+                            status = OrderLines.objects.get(orderno=order,productcode=productcode).linestatus
+                            if status == "Picking":
+                                pass
+                            else:
+                                OrderLines.objects.filter(orderno=order,productcode=productcode).update(linestatus="Picking")
+                            
+                            status = Orders.objects.get(orderno=order).orderstatus
+                            if status == "Picking":
+                                pass
+                            else:
+                                Orders.objects.filter(orderno=order).update(orderstatus="Picking")
+
+                            dept_w = "Outbound"
+                            w_type = "Picking"
+                            origin=order
+                            sourcearea = BinContent.objects.get(bin=binn).area
+                            sourcebin = binn
+                            initialsoh = int(BinContent.objects.get(bin=binn).qty)
+                            resultsoh = initialsoh -qty
+                            targetbin = "Interrim"
+                            targetarea = "INTRANS"
+                            holdingu = hu
+                            Transactions.transactions(dept_w,w_type,origin,productcode,sourcearea,sourcebin,initialsoh,qty,resultsoh,targetbin,targetarea,holdingu,user_d)
+
+                            if resultsoh == 0:
+                                BinContent.objects.filter(bin=binn).update(productcode="",qty=resultsoh,full="TRUE")
+                            else:
+                                BinContent.objects.filter(bin=binn).update(qty=resultsoh,full="TRUE")
+
+                            area = "INTRANS"
+                            binn = "Interrim"
+                            parent = order
+                            Interrim.interrims(area,binn,parent,hu,productcode,qty)
+
+
+                            verify = OrderSchedule.objects.filter(orderno=order,status="Allocated").first()
+                            if verify is None:
+                                Orders.objects.filter(orderno=order).update(orderstatus="PickStaging")
+                                AllocateCapacity.objects.filter(orderno=order).update(orderno="")
+                            else:
+                                pass
+
+                            verify = OrderSchedule.objects.filter(allocated_user=str(user_d),status="Allocated").first()
+                            if verify is None:
+                                data = {"orderno":0,"productcode":0,"allocated_bin_qty":0}
+                            else:
+                                data = OrderSchedule.objects.all().filter(allocated_user=str(user_d),status="Allocated")
+                                data = data[0]
+
+
+                            messages.warning(request, "Item picked successfully")
+                            return render(request,"links_app/outbound/user_picks.html",{"user_d":user_d,"data":data})
+
+    return render(request,"links_app/outbound/user_picks.html",{"user_d":user_d,"data":data})
+
+
+def verify_hu(request,hu):
+    token = hu[:3]
+    if token == "HUP" and len(hu) == 8:
+        verify = Transactions.objects.filter(holdingunit=hu).first()
+        if verify is None:
+            pass
+        else:
+            hu = "used"
+    elif hu[:2] == "TU" and len(hu) ==6:
+        verify = Interrim.objects.filter(holdingunit=hu).first()
+        if verify is None:
+            verify = AfterPickStaging.objects.filter(Q(holdingunit1=hu)|Q(holdingunit2=hu)|Q(holdingunit3=hu)).first()
+            if verify is None:
+                pass
+            else:
+                hu = "used"
+        else:
+            hu = "used"
+    else:
+        hu = "Invalid"
+    return hu
+
+
+
+def outboundStaging(request):
+    user_d = request.user
+    if "upload_pm" in request.POST:
+        col_no = 5
+        df = uploader(request, col_no)
+        for i in df.iterrows():
+            AfterPickStaging.objects.filter(bin = i[1][2]).delete()
+            el = AfterPickStaging.objects.create(bin=i[1][2])
+            el.hutype = i[1][0]
+            el.area = i[1][1]
+            el.status = i[1][3]
+            el.sequence = i[1][4]
+            el.save()
+
+        messages.warning(request, "Pick Staging updated")
+
+    form = CsvImportForm()
+    data = {'form':form}
+    return render(request, "links_app/systemcontrol/systemmaintenance/outboundstaging.html",data)
+
+
+def pickStaging(request):
+    user_d = request.user
+    user_id = User.objects.get(username=str(user_d)).id
+    pickertype = Employee.objects.get(user_id=user_id).area
+    if "route" in request.POST and "hu" in request.POST:
+        hu = request.POST['hu']
+        hutype = hu[:2]
+        #loadHUP(request,hu,pickertype)
+        verify = Interrim.objects.filter(holdingunit=hu).first()
+        if verify is None:
+            messages.warning(request,"HUP not available for routing")
+        else:
+            verify = OrderSchedule.objects.filter(status="Picked",pick_hu=hu).first()
+            if verify is None:
+                messages.warning(request, "HU is not available for Pick Staging")
+            else:
+                orderno = OrderSchedule.objects.get(status="Picked",pick_hu=hu).orderno
+                result = loadHUP(request,hu,pickertype,hutype,orderno)
+                if result == "FALSE":
+                    messages.warning(request,"Staging currently full, please wait")
+                else:
+                    messages.warning(request,"HU Staged successfully")
+
+    return render(request, "links_app/outbound/pickstaging.html",{"user_d":user_d})
+
+
+def loadHUP(request,hu,pickertype,hutype,orderno):
+    
+    verify = AfterPickStaging.objects.filter(hutype=hutype,status="TRUE",holdingvalue__lt=3).first()
+    if verify is None:
+        result = "FALSE"
+    else:
+        verify = AfterPickStaging.objects.filter(Q(holdingvalue=1)|Q(holdingvalue=2),orderno = orderno,hutype=hutype).first()
+        if verify is None:
+            all = AfterPickStaging.objects.filter(hutype=hutype,holdingvalue=0,status="TRUE").values_list('area','bin',"holdingvalue","sequence")
+            
+            area = []
+            bin = []
+            slot = []
+            sequence = []
+
+            for i in all:
+                area.append(i[0])
+                bin.append(i[1])
+                slot.append(i[2])
+                sequence.append(i[3])
+
+            df = {"area":area,"bin":bin,"slot":slot,"sequence":sequence}
+            
+            
+            all = pd.DataFrame(df,columns= {'area',"bin","slots","sequence"})
+            seq = list(all['sequence'])
+            seq.sort()
+            sel_seq = seq[0]
+            binn = all[all["sequence"]==sel_seq]['bin'].values
+            print(binn)
+            AfterPickStaging.objects.filter(bin=binn[0]).update(holdingunit1=hu,holdingvalue=1,orderno=orderno)
+            OrderSchedule.objects.filter(pick_hu=hu).update(status="PickStaging")
+            Interrim.objects.filter(holdingunit=hu).delete()
+
+            result = "TRUE"
+
+        else:
+            binn = AfterPickStaging.objects.filter(Q(holdingvalue=1)|Q(holdingvalue=2),orderno = orderno).values_list("bin")
+            sel_bin = []
+            for i in binn:
+                sel_bin.append(i[0])
+
+            
+            qty = int(AfterPickStaging.objects.get(bin=sel_bin[0]).holdingvalue)
+
+            qty = qty+1
+
+
+            holder1 = AfterPickStaging.objects.get(bin=sel_bin[0]).holdingunit1
+            holder2 = AfterPickStaging.objects.get(bin=sel_bin[0]).holdingunit2
+
+
+            if holder1 =="" or holder1 ==" ":
+                AfterPickStaging.objects.filter(bin=sel_bin[0]).update(holdingunit1=hu,holdingvalue=qty)
+                OrderSchedule.objects.filter(pick_hu=hu).update(status="PickStaging")
+                Interrim.objects.filter(holdingunit=hu).delete()
+            elif holder2 == "" or holder2 == " ":
+                AfterPickStaging.objects.filter(bin=sel_bin[0]).update(holdingunit2=hu,holdingvalue=qty)
+                OrderSchedule.objects.filter(pick_hu=hu).update(status="PickStaging")
+                Interrim.objects.filter(holdingunit=hu).delete()
+            else:
+                AfterPickStaging.objects.filter(bin=sel_bin[0]).update(holdingunit3=hu,holdingvalue=qty)
+                OrderSchedule.objects.filter(pick_hu=hu).update(status="PickStaging")
+                Interrim.objects.filter(holdingunit=hu).delete()
+
+            result = "TRUE"
+
+    return result
+
+
+
+
+        
+
+
+        
+
+
+   
+
+
+
+
+
+
+
+

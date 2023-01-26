@@ -8,9 +8,11 @@
         
         {% include 'links_app/base.html' %}
         <br>
+        <div class="container" style="text-align: center; border-radius: 10px;
+        background-color:#eee;; box-shadow: 0 20px 35px rgba(20,0,20,0.1);
+        width:370px;margin: 0.1rem auto;"><h1 style="color: green;font-size: 30px;">Assign ASN</h1></div>
+        <div class="container"><hr class="rounded" style="border-top: 8px solid #bbb;border-radius: 5px;width: 100%"></div>
         <div class="container">
-            <h4>Assign User</h4>
-            <hr class="rounded" style="border-top: 8px solid #bbb;border-radius: 5px;width: 40%">
             <form method="post" action="#">
                 <label for="">ASNNO</label>
                 <input type="text" id="asnno" name="asnno" placeholder="Enter ASNNO" Required>
@@ -20,12 +22,11 @@
                 {% csrf_token %}
             </form>
         </div>
-        <br>
-        <div class="container">{% include 'links_app/message.html' %}</div>
-        <br>
+        <div class="container"><hr class="rounded" style="border-top: 8px solid #bbb;border-radius: 5px;width: 100%"></div>
+        {% include 'links_app/message.html' %}
+        <div class="container"><hr class="rounded" style="border-top: 8px solid #bbb;border-radius: 5px;width: 100%"></div>
         <div class ="container" style="position: relative;width:100%;display: block;">
             <div class = "col-md-6">
-                <h4>Available UnClosed ASNs</h4>
                     <form action="#" method="post">
                         <table border="1" class="table table-bordered" style="border-collapse: collapse; width: 120%;font-size: 10px">
                             <thead>

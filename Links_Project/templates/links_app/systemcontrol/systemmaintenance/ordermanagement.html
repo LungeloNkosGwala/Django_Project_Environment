@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+{% load static %}
+{% include 'links_app/head.html' %}
+<body>
+
+
+    {% if user.is_authenticated %}
+        
+        {% include 'links_app/base.html' %}
+        <br>
+        <div class="container"><h4>System Maintenance</h4></div>
+
+        <div class="container">
+            <table width = "100%" border = "0">
+            
+                {% include 'links_app/systemcontrol/base_links.html' %}
+
+                    <td bgcolor = "#b5dcb3" height = "120" width = "60%">
+                        Order Management</br>
+
+
+                    </td>
+                    {% include 'links_app/systemcontrol/base_links1.html' %}
+                </tr>
+            
+            <table>
+        </div>
+
+        <div class="container">
+            <form method="post" action="#">
+                <button name="schedule">schedule</button>
+                {% csrf_token %}
+            </form>
+        </div>
+
+        <div class="container" style="position: relative;width:100%;display: block;">
+            <div class = "col-md-6">
+                <form action="#" method="post">  
+                    <table border="1" class="table table-bordered" style="border-collapse: collapse; width: 70%;font-size: 8px">
+                        <thead>
+                            <th style="width:10%">Orderno</th>
+                            <th style="width:10%">Productcode</th>
+                            <th style="width:10%">availableqty</th>
+                            <th style="width:10%">orderedqty</th>
+                            <th style="width:10%">pickedqty</th>
+                            <th style="width:10%">Picker1</th>
+                            <th style="width:10%">Pickbin1</th>
+                            <th style="width:10%">Pickqty1</th>
+                            <th style="width:10%">status1</th>
+                            <th style="width:10%">Picker2</th>
+                            <th style="width:10%">Pickbin2</th>
+                            <th style="width:10%">Pickqty2</th>
+                            <th style="width:10%">status2</th>
+                            <th style="width:10%">Picker3</th>
+                            <th style="width:10%">Pickbin3</th>
+                            <th style="width:10%">Pickqty3</th>
+                            <th style="width:10%">status3</th>
+                        </thead>
+                        {% for k in data  %}
+                        <tr>
+                            <td><button type="submit" name = "inquire" value="{{k.orderno}}">{{k.orderno}}</button></td>
+                            <td>{{k.productcode}}</td>
+                            <td>{{k.availableqty}}</td>
+                            <td>{{k.orderedqty}}</td>
+                            <td>{{k.pickedqty}}</td>
+                            <td>{{k.allocated_user1}}</td>
+                            <td>{{k.pickbin1}}</td>
+                            <td>{{k.pickqty1}}</td>
+                            <td>{{k.status1}}</td>
+                            <td>{{k.allocated_user2}}</td>
+                            <td>{{k.pickbin2}}</td>
+                            <td>{{k.pickqty2}}</td>
+                            <td>{{k.status2}}</td>
+                            <td>{{k.allocated_user3}}</td>
+                            <td>{{k.pickbin2}}</td>
+                            <td>{{k.pickqty3}}</td>
+                            <td>{{k.status3}}</td>
+                        </tr>
+                        {% endfor %}
+                        {% csrf_token %}
+                    </table>
+                </form>
+            </div>
+        </div>
+
+
+    {% else %}
+    <li><a class="navbar-link" href="{% url 'user_login' %}">Login</a></li>
+    <li><a class="navbar-link" href="{% url 'register' %}">Regsiter</a></li>
+    {% endif %}
+    {% csrf_token %}
+</body>
+<script src="//cdn.datatables.net/1.12.1/js/jquery.dataTables.min.js"></script>
+<script src="{% static 'javascript/javascript.js' %}" type="text/javascript"></script>
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+</html>
