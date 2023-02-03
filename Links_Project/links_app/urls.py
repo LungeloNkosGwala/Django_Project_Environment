@@ -5,7 +5,9 @@ from links_app import views
 
 urlpatterns = [
         path("index/",views.index,name='index'),
+        path("scanner_index/",views.scanner_index,name="scanner_index"),
         path("user_login/",views.user_login, name='user_login'),
+        path("scanner_login/",views.scanner_login,name="scanner_login"),
         path("loadasn/",views.loadasn, name="loadasn"),
         path("pmupdate/",views.pmupdate, name='pmupdate'),
         path("binupdate/",views.binupdate, name='binupdate'),
@@ -28,6 +30,7 @@ urlpatterns = [
         path("allocationcapacity/",views.allocationcapacity,name="allocationcapacity"),
         path("ordermanagement/",views.ordermanagement,name='ordermanagement'),
         path("rep_inbound/",views.rep_inbound, name="rep_inbound"),
+        path("rep_inventory/",views.rep_inventory,name="rep_inventory"),
         path("orderschedule/", views.orderschedule,name="orderschedule"),
         path("user_picks/",views.user_picks, name='user_picks'),
         path("outboundstaging/",views.outboundStaging, name="outboundstaging"),

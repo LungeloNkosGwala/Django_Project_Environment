@@ -1,0 +1,21 @@
+{% include 'links_app/head.html' %}
+    <body style="background-color: #eee">
+        
+
+
+        {% if user.is_authenticated %}
+        
+        {% include 'links_app/scanner/scanner_base.html' %}
+    
+        
+        {% else %}
+        <div class="container" style="position: center; padding-left: 400px;padding-top: 100px;">
+            <h1 style="padding-left:50px;">Links</h1>
+            <br>
+            <h4>Hi,welcome to Links Scanner</h4>
+            <p>Please click on the Login link: <a class="navbar-link" href="{% url 'scanner_login' %}">Login</a></p>
+        </div>
+        {% endif %}
+        {% csrf_token %}
+    </body>
+</html>

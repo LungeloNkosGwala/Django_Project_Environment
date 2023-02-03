@@ -308,7 +308,7 @@ class AfterPickStaging(models.Model):
     holdingunit2 = models.CharField(max_length=30)
     holdingunit3 = models.CharField(max_length=30)
     status = models.CharField(max_length=30)
-    position = models.CharField(max_length=30)
+    packer_user = models.CharField(max_length=30)
     sequence = models.IntegerField(default=0)
     orderno = models.CharField(max_length=30)
 
@@ -408,6 +408,25 @@ class AllocateCapacity(models.Model):
     active = models.CharField(max_length=30)
     orderno = models.CharField(max_length=30)
     station_type = models.CharField(max_length=30)
+
+class DUConfirm(models.Model):
+    du = models.CharField(max_length=30)
+    orderno = models.CharField(max_length=30)
+    productcode = models.CharField(max_length=30)
+    qty = models.IntegerField(default=0)
+    packdate = models.DateTimeField(null=True, blank=True)
+    box_type = models.CharField(max_length=30)
+    packer = models.CharField(max_length=30)
+    weight = models.FloatField(default=0)
+
+
+class Shipment(models.Model):
+    Shipmentno = models.CharField(max_length=30)
+    orderno = models.CharField(max_length=30)
+    du = models.CharField(max_length=30)
+    shippeddate = models.DateTimeField(null=True, blank=True)
+    
+
 
 
     
