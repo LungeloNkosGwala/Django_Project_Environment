@@ -35,6 +35,7 @@ urlpatterns = [
         path("user_picks/",views.user_picks, name='user_picks'),
         path("outboundstaging/",views.outboundStaging, name="outboundstaging"),
         path("pickstaging/",views.pickStaging, name="pickstaging"),
+        path("packing/",views.packing,name="packing"),
 ]
 
 

@@ -418,6 +418,9 @@ class DUConfirm(models.Model):
     box_type = models.CharField(max_length=30)
     packer = models.CharField(max_length=30)
     weight = models.FloatField(default=0)
+    status = models.CharField(max_length=30)
+
+
 
 
 class Shipment(models.Model):

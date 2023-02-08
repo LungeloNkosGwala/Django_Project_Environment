@@ -121,9 +121,6 @@ def create_lines(request,asnno,data,linestatus):
         el.save()
 
 
-
-
-
 @login_required
 def loadasn(request):
     user_d = request.user
@@ -220,7 +217,6 @@ def uploader(request, col_no):
     df.columns = df.iloc[0]
     df = df[1:]
     return df
-
 
 
 @login_required
@@ -666,8 +662,6 @@ def create_route(request,productcode,user_d,hu):
             return render(request,"links_app/inbound/putaway.html",{"user_d":user_d})
 
 
-
-
 def putaway_hu(request,hu,productcode,qty,bin,sourceqty,remaining_qty,nw_qty,user_d,TRUE_FALSE):
     #Into Bin Content
     BinContent.objects.filter(bin = bin).update(productcode=productcode, qty=nw_qty,avail_qty=nw_qty,full=TRUE_FALSE,route="FALSE")
@@ -685,8 +679,6 @@ def putaway_hu(request,hu,productcode,qty,bin,sourceqty,remaining_qty,nw_qty,use
     targetarea = str(BinContent.objects.get(bin=bin).area)
     holdingu = hu
     Transactions.transactions(dept_w,w_type,origin,productcode,sourcearea,sourcebin,initialsoh,qty,resultsoh,targetbin,targetarea,holdingu,user_d)
-
-
 
 
 def remainqty(request,hu,productcode,qty,bin,sourceqty,remaining_qty,nw_qty,user_d):
@@ -710,7 +702,6 @@ def remainqty(request,hu,productcode,qty,bin,sourceqty,remaining_qty,nw_qty,user
         Interrim.interrims(area,binn,parent,hu,productcode,qty)
         messages.success(request, "Part successfully Putaway")
         return render(request,"links_app/inbound/putaway.html",{"user_d":user_d})
-
 
 
 @login_required
@@ -770,7 +761,6 @@ def putaway(request):
     return render(request,"links_app/inbound/putaway.html",{"user_d":user_d})
         
             
-
 @login_required
 def pfep(request):
     user_d = request.user
@@ -825,8 +815,6 @@ def bin_inquire(request):
             data1 = BinContent.objects.all().filter(productcode=productcode)
             return render(request,"links_app/inquire/bin_inquire.html",{"user_d":user_d,"data1":data1})
     return render(request,"links_app/inquire/bin_inquire.html",{"user_d":user_d})
-
-
 
 
 def transactions(request):
@@ -1552,7 +1540,6 @@ def allocationcapacity(request):
     return render(request,"links_app/systemcontrol/systemmaintenance/allocationcapacity.html",data)
 
 
-
 def orderschedule(request):
     user_d = request.user
     df = no_of_picks(request)
@@ -1877,7 +1864,7 @@ def user_picks(request):
                                 update_qty = initial_qty+qty
                                 OrderLines.objects.filter(orderno=order,productcode=productcode).update(qtypicked=update_qty)
                             else:
-                                OrderLines.objects.filter(orderno=order,productcode=productcode).update(status="Picking",qtypicked=qty)
+                                OrderLines.objects.filter(orderno=order,productcode=productcode).update(linestatus="Picking",qtypicked=qty)
                             
                             status = Orders.objects.get(orderno=order).orderstatus
                             if status == "Picking":
@@ -2007,16 +1994,36 @@ def pickStaging(request):
 
 
 def packer_allocate(request,orderno,p_id,p_name,pp_id,pp_name):
+    print(p_name)
     verify = AfterPickStaging.objects.filter(orderno = orderno).first()
     if verify is None:
         count = []
         for i in p_name:
-            a = (AfterPickStaging.objects.filter(packer_user=i).aggregate(Sum("holdingvalue")).value())[0]
-            count.append(a)
+            verify = AfterPickStaging.objects.filter(packer_user=i).first()
+            if verify is None:
+                a = 0
+                count.append(a)
+            else:
+                a = (AfterPickStaging.objects.filter(packer_user=i).aggregate(Sum("holdingvalue")).value())[0]
+                count.append(a)
         
-        
+        dicts = {"User":p_name,"lines":count}
+        df = pd.DataFrame(dicts, columns={"User","Lines"})
+        val = df['Lines'].min()
+        b = df[df['Lines']==val]['User'].values[0]
 
-    
+
+    else:
+
+        name = list(AfterPickStaging.objects.filter(orderno = orderno).values_list("packer_user", flat=True))
+        print(name)
+
+        if name[0] == "" or name[0] == " ":
+            b = p_name[0]
+        else:
+            b = name[0]
+        
+    AfterPickStaging.objects.filter(orderno=orderno).update(packer_user=b)
 
   
 def loadHUP(request,hu,pickertype,hutype,orderno):
@@ -2088,7 +2095,7 @@ def update_StageStatus(request,hu,orderno):
     OrderSchedule.objects.filter(pick_hu=hu).update(status="PickStaging")
     productcode = Interrim.objects.get(holdingunit=hu).productcode
     Interrim.objects.filter(holdingunit=hu).delete()
-    OrderLines.objects.filter(orderno=orderno,productcode=productcode).update(status="PickStaging")    
+    OrderLines.objects.filter(orderno=orderno,productcode=productcode).update(linestatus="PickStaging")
 
 
 
@@ -2097,75 +2104,117 @@ def packing(request):
     user_id = User.objects.get(username=str(user_d)).id
     packtype = Employee.objects.get(user_id=user_id).area
     data = packer_display(request,user_d)
-    if "hu" in request.POST and "qty" in request.POST and "pack" in request.POST:
+    verify = DUConfirm.objects.filter(packer=str(user_d),status="Holder").first()
+    box_type = {"0":"B10",'1': 'B20', '2': 'B30', '3': 'B40', '4': 'BP'}
+    if verify is None:
+        du = "Create DU"
+    else:
+        du = str(DUConfirm.objects.get(packer=str(user_d),status="Holder").du)
+
+    if "hu" in request.POST and "qty" in request.POST and "productcode" in request.POST:
         hu = request.POST['hu']
         qty = request.POST['qty']
         productcode = request.POST['productcode']
-        sel_hu = request.POST['sel_hu']
-        du = request.POST['du']
+        #sel_hu = request.POST['sel_hu']
+        #du = request.POST['du']
+        t = request.POST['submit']
 
-        verify = OrderSchedule.objects.filter(status="PickStaging", pick_hu=hu, productcode=productcode)
+        verify =DUConfirm.objects.filter(packer=str(user_d),status='Holder')
         if verify is None:
-            messages.warning(request,"Error, etheir HU not available for Packing, part scan does not below in HU")
+            messages.warning(request,"Error, please create a DU before DU Confirming a product")
         else:
-            if sel_hu != hu:
-                messages.warning(request,"The scanned HU is not the requested HU, please check your request HU")
-            else:
-                print("Code is for Packing")
-                result,orderno = update_Staging_child(request,hu,qty,productcode,user_d)
-                if result == "FALSE":
-                    messages.warning(request,"DU Confirm failed, please check with IT")
+            du = str(DUConfirm.objects.get(packer=str(user_d),status='Holder').du)
+
+            sel_hu = t.partition("|")[0]
+            t = t.partition("|")[2]
+            orderno = t.partition("_")[0]
+            binn = t.partition("_")[2]
+
+            print(orderno)
+            print(binn)
+            print(sel_hu)
+
+            if hu in sel_hu:
+                verify = OrderSchedule.objects.filter(orderno=orderno,productcode=productcode,pick_hu=hu).first()
+                if verify is None:
+                    messages.warning(request,"Error, Productcode scanned doesn not belong in the HU")
                 else:
-                    OrderSchedule.objects.filter(orderno=orderno,pick_hu=hu).update(status="Packing",pack_hu=du,pack_qty=qty)
-                    int_qty = int(OrderLines.objects.filter(orderno=orderno,productcode=productcode).qtypacked)
-                    new_qty = int_qty+int(qty)
-                    OrderLines.objects.filter(orderno=orderno,productcode=productcode).update(qtypacked=new_qty,status="Packing")
+                    result = update_Staging_child(request,hu,qty,productcode,binn,orderno)
+                    if result == "FALSE":
+                        messages.warning(request,"DU Confirm failed, please check with IT")
+                    else:
+                        OrderSchedule.objects.filter(orderno=orderno,pick_hu=hu).update(status="Packing",pack_hu=du,packed_qty=qty)
+                        int_qty = int(OrderLines.objects.get(orderno=orderno,productcode=productcode).qtypacked)
+                        new_qty = int_qty+int(qty)
+                        OrderLines.objects.filter(orderno=orderno,productcode=productcode).update(qtypacked=new_qty,linestatus="Packing")
+                        loadDU(request, orderno,du,productcode,new_qty)
+                        messages.warning(request,"DU Confirmed successfully")
+            else:
+                messages.warning(request,"Error, the HU scanned is not the requested HU")
+                    
 
-    elif "open_box" in request.POST and "box_type" in request.POST:
+    elif "execute" in request.POST and "box_type" in request.POST:
         box_type = request.POST['box_type']
-        du = generate_du(request)
 
-        el = DUConfirm.objects.create(du = du)
-        el.boxtype = box_type
-        el.save
+        verify = DUConfirm.objects.filter(packer=str(user_d),status="Holder").first()
+        if verify is None:
+            du = generate_du(request,data,box_type,user_d)
+            messages.warning(request, "DU no: {} successfully created".format(du))
+        else:
+            messages.warning(request, "Error, You currently have an Open DU under your user")
+
     elif "close" in request.POST and "confirm" in request.POST:
         du = request.POST['confirm']
         verify = DUConfirm.objects.filter(du=du, packer=str(user_d)).first()
         if verify is None:
             messages.warning(request,"Can confirm a Non-existing DU")
         else:
-            check_qty = int(DUConfirm.objects.filter(Q(productcode="")|Q(productcode=" "),du=du).count())
+            check_qty = list(DUConfirm.objects.filter(du=du,packer=str(user_d),orderno=orderno).aggregate(Sum("qty")).values())[0]
             if check_qty == 0:
                 messages.warning(request,"Error, Cannot close an empty DU")
             else:
-                pass
+                DUConfirm.objects.filter(du=du,orderno=orderno,status="Holder").delete()
         pass
 
-def generate_du(request):
-    verify = Orders.objects.filter().first()
+    return render(request,"links_app/outbound/packing.html",{"user_d":user_d,"data":data,"du":du,"box_type":box_type})
+
+
+def loadDU(request, du,orderno,productcode,new_qty):
+    verify = DUConfirm.objects.filter(du=du,productcode=productcode).first()
+    if verify is None:
+        el = DUConfirm.objects.create(du=du)
+        el.productcode = productcode
+        el.orderno = orderno
+        el.qty = new_qty
+        el.status = "Packing"
+        el.save()
+    else:
+        DUConfirm.objects.filter(du=du, orderno=orderno, productcode=productcode).update(qty=new_qty)
+
+def generate_du(request,data,box_type,user_d):
+    verify = DUConfirm.objects.filter().first()
     if verify is None:
         du = "DU" +"100000"
     else:
-        last_orderno = Orders.objects.all().last().orderno
-        na = int(last_orderno[2:])+1
+        last_du = DUConfirm.objects.all().last().du
+        na = int(last_du[2:])+1
         du= "DU"+str(na)
+    
+    orderno = data.orderno
+    el = DUConfirm.objects.create(du = du)
+    el.orderno = orderno
+    el.box_type = box_type
+    el.packer = str(user_d)
+    el.status = "Holder"
+    el.save()
+
     return du
         
     
-def update_Staging_child(request,hu,qty,productcode,user_d):
+def update_Staging_child(request,hu,qty,productcode,binn,orderno):
     #Find orderno.
-    all = OrderSchedule.objects.filter(pick_hu=hu).values_list("bin","holdingvalue","orderno")
-    orderno = []
-    hvalue = []
-    binn = []
-    for i in all:
-        binn.append(i[0])
-        hvalue.append(i[1])
-        orderno.append(i[2])
-    
-    binn = binn[0]
-    orderno = orderno[0]
-    hvalue = hvalue[0] - 1
+    hvalue = int(AfterPickStaging.objects.get(bin=binn,orderno=orderno).holdingvalue)
+    hvalue = hvalue - 1
 
     verify = AfterPickStaging.objects.filter(holdingunit1=hu,orderno=orderno).first()
     if verify is None:
@@ -2182,12 +2231,12 @@ def update_Staging_child(request,hu,qty,productcode,user_d):
         AfterPickStaging.objects.filter(bin=binn,orderno=orderno).update(holdingunit1="")
 
     if hvalue == 0:
-        AfterPickStaging.objects.filter(bin=binn).update(orderno="")
+        AfterPickStaging.objects.filter(bin=binn).update(orderno="",packer="")
     else:
-        pass
+        AfterPickStaging.objects.filter(bin=binn).update(holdingvalue=hvalue)
 
     result = "TRUE"
-    return result,orderno
+    return result
 
 
 def packer_display(request,user_d):
@@ -2195,11 +2244,14 @@ def packer_display(request,user_d):
     if verify is None:
         data = {"bin":0,"holdingunit1":0,"holdingunit2":0,"holdingunit3":0,"orderno":0}
     else:
-        data = AfterPickStaging.objects.filter(packer_user=str(user_d)).first()
+        data = AfterPickStaging.objects.all().filter(packer_user=str(user_d))
         data = data[0]
     return data
 
-     
+
+
+
+####Close the Current DU, create another DU before continuing with the DU Confirm
 
 
         
