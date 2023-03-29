@@ -1,3 +1,7 @@
+{% load static %}
+
+
+<!--
 {% if messages %}
 <div class="container">
     <dl class="messages">
@@ -7,3 +11,24 @@
     </dl>
     {% endif %}
 </div>
+-->
+
+{% for message in messages %}
+  <div class="alert {{ message.tags }} alert-dismissible" role="alert" style="padding: 0.5rem 1rem; font-size: 0.6rem; margin-bottom: 0.5rem;">
+    <button type="button" class="close" aria-label="Close" style="padding: 0.1rem 0.1rem;" >
+      <span aria-hidden="True">&times;</span>
+    </button>
+    {{ message }}
+  </div>
+{% endfor %}
+
+<link rel="stylesheet" type="text/css" href="{% static 'css/style.css' %}">
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script>
+$(document).ready(function() {
+  $('.close').click(function() {
+    $(this).closest('.alert').remove();
+  });
+});
+</script>
+

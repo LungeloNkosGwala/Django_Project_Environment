@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+{% load static %}
+{% include 'links_app/head.html' %}
+<body>
+
+
+    {% if user.is_authenticated %}
+        
+        {% include 'links_app/base.html' %}
+
+
+
+
+        {% include 'links_app/systemcontrol/order_menu.html' %}
+
+        {% else %}
+        <li><a class="navbar-link" href="{% url 'user_login' %}">Login</a></li>
+        <li><a class="navbar-link" href="{% url 'register' %}">Regsiter</a></li>
+        {% endif %}
+        {% csrf_token %}
+    </body>
+
+</html>

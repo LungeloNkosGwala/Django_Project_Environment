@@ -2,14 +2,15 @@ from django.shortcuts import render
 from django.contrib.auth import authenticate, login,logout
 from django.http import HttpResponseRedirect, HttpResponse
 from django.urls import reverse
-from django.contrib.auth.decorators import login_required
+from django.contrib.auth.decorators import login_required,user_passes_test
 from django.contrib.auth.models import User
 from django.contrib.auth.forms import UserCreationForm
-from links_app.models import ProductMaster, Routing, AsnLines,Delivery,BinContent, Transactions,Interrim,RouteCodes,DUConfirm
+from links_app.models import ProductMaster, Routing, AsnLines,Delivery,BinContent, Transactions,Interrim,RouteCodes,DUConfirm,Shipment
 from links_app.models import AllocateCapacity,Customers,Orders,OrderLines,Employee,Orders,OrderManagement,OrderSchedule,AfterPickStaging
 from django.db.models import Sum,Aggregate,Q,Max,Count
 from django.contrib import messages
-from datetime import datetime
+from datetime import datetime, timedelta
+from django.utils import timezone
 from django import forms
 import pandas as pd
 import plotly.express as px
@@ -27,6 +28,12 @@ orderstatus = ['New','Allocated','Picking','PickStaging','Packing','Routecage',"
 def check_admin(user):
     return user.is_staff
 
+def check_active(user):
+    return user.is_active
+
+def check_inbound(user):
+    user_id = User.objects.get(username=str(user)).id
+    pickertype = Employee.objects.get(user_id=user_id).area
 
 def index(request):
     return render(request,"links_app/index.html")
@@ -34,6 +41,8 @@ def index(request):
 def scanner_index(request):
     return render(request,"links_app/scanner_index.html")
 
+
+#@user_passes_test(check_active,"user_login")
 def user_login(request):
     if request.method == "POST":
         username = request.POST.get("username")
@@ -56,6 +65,7 @@ def user_login(request):
         return render(request,'links_app/login.html')
 
 @login_required
+@user_passes_test(check_admin,"index")
 def register(request):
     avail_users = User.objects.all()
     if request.method == 'POST':
@@ -71,7 +81,7 @@ def register(request):
 
 
 
-@login_required
+#@login_required
 def user_logout(request):
     logout(request)
     return HttpResponseRedirect(reverse("index"))
@@ -111,61 +121,68 @@ def verify_R(request,hu):
     return verify
 
 
-def create_lines(request,asnno,data,linestatus):
+def create_lines(request,asnno,data):
     for i in data:
         el = AsnLines.objects.create(productcode=i.productcode)
         el.asnno = asnno
         el.description = ProductMaster.objects.get(productcode=i.productcode).description
         el.totalqty = i.qty
-        el.linestatus = linestatus[0]
+        el.linestatus = "New"
         el.save()
 
 
-@login_required
+@user_passes_test(check_admin,"index")
 def loadasn(request):
     user_d = request.user
-    data = Routing.objects.all().filter(stagingtype=routing_status[0])
+    data = Routing.objects.all().filter(stagingtype='AsnStaging')
     if "stage" in request.POST:
         productcode = request.POST['productcode']
         qty = int(request.POST['qty'])
 
         if verify_PM(request,productcode) is None:
-            print("None")
+            messages.warning(request,"Part number doesn't exist in PM")
         else:
             productcode = get_productcode(request,productcode)
-            stagingtype=routing_status[0]
-            hu = placeholder[1]
-            targetbin_1 = placeholder[0]
-            Routing.routing(stagingtype,hu,productcode,qty,targetbin_1,user_d)
-            messages.warning(request, "Part successfully staged")
-            #return render(request,"links_app/inbound/loadasn.html",{"data":data})
+            stagingtype='AsnStaging'
+            hu = 'ASNNO'
+            targetbin_1 = 'ASN'
+
+            verify = Routing.objects.filter(stagingtype="AsnStaging",productcode=productcode).first()
+            if verify is None:
+                Routing.routing(stagingtype,hu,productcode,qty,targetbin_1,user_d)
+                messages.success(request, "Partnumber staged successfully")
+            else:
+                int_qty = int(Routing.objects.get(stagingtype="AsnStaging",productcode=productcode).qty)
+                qty = int_qty + qty
+                Routing.objects.filter(stagingtype="AsnStaging",productcode=productcode).update(qty=qty)
+                messages.success(request, "Partnumber staging updated Successfully")
+
+
 
     elif "create" in request.POST:
-        data_1 = Routing.objects.filter(stagingtype=routing_status[0]).first()
-        if data_1 is None:
-            messages.warning(request, "No staged lines available to create Asn")
+        verify = Routing.objects.filter(stagingtype='AsnStaging').first()
+        if verify is None:
+            messages.warning(request, "No available lines for ASN create")
             return render(request,"links_app/inbound/loadasn.html",{"data":data})
         else:
             no = 10000
             asnno = "ASN"+str(no)
-            verify = Delivery.objects.filter().first()
             asn_type = "Local"
             client = "Namlo"
+
+            verify = Delivery.objects.filter().first()
             if verify is None:
-                Delivery.create_asn(asnno,user_d,asn_type,client,asn_status)
-                create_lines(request,asnno,data,linestatus)
-                Routing.objects.filter(stagingtype=routing_status[0]).delete()
-                messages.warning(request, "Asn created successfully")
-                return render(request,"links_app/inbound/loadasn.html",{"user_d":user_d,"data":data})
+                pass
             else:
                 el = Delivery.objects.all().last().asnno
                 el = int(el[3:])+1
                 asnno = "ASN"+str(el)
-                Delivery.create_asn(asnno,user_d,asn_type,client,asn_status)
-                create_lines(request,asnno,data,linestatus)
-                Routing.objects.filter(stagingtype=routing_status[0]).delete()
-                messages.warning(request, "Asn created successfully")
-                return render(request,"links_app/inbound/loadasn.html",{"user_d":user_d,"data":data})
+
+            Delivery.create_asn(asnno,user_d,asn_type,client,asn_status)
+            create_lines(request,asnno,data)
+            Routing.objects.filter(stagingtype='AsnStaging').delete()
+            messages.success(request, "Asn created successfully")
+            return render(request,"links_app/inbound/loadasn.html",{"user_d":user_d})
     
     elif "execute" in request.POST:
         productcode = request.POST['delete']
@@ -219,7 +236,7 @@ def uploader(request, col_no):
     return df
 
 
-@login_required
+@user_passes_test(check_admin,"index")
 def pmupdate(request):
     if "upload_pm" in request.POST:
         col_no = 10
@@ -243,9 +260,9 @@ def pmupdate(request):
     form = CsvImportForm()
     data = {'form':form}
 
-    return render(request,"links_app/systemcontrol/pmupdate.html",data)
+    return render(request,"links_app/systemcontrol/systemmaintenance/pmupdate.html",data)
 
-@login_required
+@user_passes_test(check_admin,"index")
 def binupdate(request):
     count = 0
     if "upload_pm" in request.POST:
@@ -271,10 +288,10 @@ def binupdate(request):
     form = CsvImportForm()
     data = {'form':form,"count":count}
 
-    return render(request,"links_app/systemcontrol/binupdate.html",data)
+    return render(request,"links_app/systemcontrol/systemmaintenance/binupdate.html",data)
 
 
-@login_required
+@user_passes_test(check_admin,"index")
 def createdelivery(request):
     user_d = request.user
     if "create" in request.POST:
@@ -282,34 +299,39 @@ def createdelivery(request):
         ref = request.POST['ref']
         del_type = request.POST['type']
 
-        verify = Delivery.objects.filter(asnno=asnno,type=del_type).first()
+        verify = AsnLines.objects.filter(asnno=asnno).first()
         if verify is None:
-            print("Not successful")
-            messages.warning(request,"ASN no. doesn't exist for this Delivery, please request an ASN creation")
+            messages.warning(request,"No ASN exists for this Delivery")
             return render(request,"links_app/inbound/createdelivery.html",{"user_d":user_d})
+        
         else:
-            verify = Delivery.objects.filter(reference = ref).first()
+            verify = Delivery.objects.filter(deliveryno=str(asnno)+"_1").first()
             if verify is None:
-                Delivery.objects.filter(asnno=asnno).update(deliveryno=str(asnno)+"_1", reference=ref, 
-                                                            delivery_createdate=datetime.now(),
-                                                            status=asn_status[1], delivery_createuser=str(user_d))
-                dept_w = "Inbound"
-                w_type = "CreateDelivery"
-                origin = str(asnno)+"_1"
-                productcode = ""
-                sourcearea = del_type
-                sourcebin = ""
-                initialsoh = 0
-                qty = 0
-                resultsoh = 0
-                targetbin = ""
-                targetarea = "Delivery"
-                holdingu = ""
-                Transactions.transactions(dept_w,w_type,origin,productcode,sourcearea,sourcebin,initialsoh,qty,resultsoh,targetbin,targetarea,holdingu,user_d)
-                messages.warning(request, "Delivery created successfully!")
-                return render(request,"links_app/inbound/createdelivery.html",{"user_d":user_d})
+                verify = Delivery.objects.filter(reference = ref).first()
+                if verify is None:
+                    Delivery.objects.filter(asnno=asnno).update(deliveryno=str(asnno)+"_1", reference=ref, 
+                                                                delivery_createdate=datetime.now(),
+                                                                status=asn_status[1], delivery_createuser=str(user_d))
+                    dept_w = "Inbound"
+                    w_type = "CreateDelivery"
+                    origin = str(asnno)+"_1"
+                    productcode = ""
+                    sourcearea = del_type
+                    sourcebin = ""
+                    initialsoh = 0
+                    qty = 0
+                    resultsoh = 0
+                    targetbin = ""
+                    targetarea = "Delivery"
+                    holdingu = ""
+                    Transactions.transactions(dept_w,w_type,origin,productcode,sourcearea,sourcebin,initialsoh,qty,resultsoh,targetbin,targetarea,holdingu,user_d)
+                    messages.success(request, "Delivery created successfully!")
+                    return render(request,"links_app/inbound/createdelivery.html",{"user_d":user_d})
+                else:
+                    messages.warning(request,"Reference no. cannot be reused, please check for correct Delivery reference")
+                    return render(request,"links_app/inbound/createdelivery.html",{"user_d":user_d})
             else:
-                messages.warning(request,"Reference no. cannot be reused, please check for correct Delivery reference")
+                messages.warning(request,"Delivery has already been created")
                 return render(request,"links_app/inbound/createdelivery.html",{"user_d":user_d})
 
 
@@ -320,10 +342,11 @@ def check_user(request,assigned_user):
     verify = User.objects.filter(username=assigned_user).first()
     return verify
 
-@login_required
+
+@user_passes_test(check_admin,"index")
 def assignuser(request):
     user_d = request.user
-    data = Delivery.objects.all().filter(Q(status=asn_status[1])|Q(status=asn_status[2])|Q(status=asn_status[3]))
+    data = Delivery.objects.all().filter(Q(status="DeliveryCreated")|Q(status="New")|Q(status="Inprogress"))
     if "assign" in request.POST:
         asnno = request.POST['asnno']
         assigned_user = request.POST['assigned_user']
@@ -337,28 +360,26 @@ def assignuser(request):
                 return render(request,"links_app/inbound/assignuser.html",{"user_d":user_d,"data":data})
             else:
                 index = asn_users(request,user_d)
-                print(index)
                 if index == 0 or index == 1 or index == 2:
-                    print(index)
                     messages.warning(request, "Cannot assign User to another unClosed ASN")
                     return render(request,"links_app/inbound/assignuser.html",{"user_d":user_d,"data":data})
                 elif index == 5:
                     cur_user = Delivery.objects.get(asnno=asnno).assigned_user1
                     if cur_user == " " or cur_user == "":
                         Delivery.objects.filter(asnno=asnno).update(assigned_user1=assigned_user)
-                        messages.warning(request, "User successfully assigned to ASN")
+                        messages.success(request, "User successfully assigned to ASN")
                         return render(request,"links_app/inbound/assignuser.html",{"user_d":user_d,"data":data})
                     else:
                         cur_user = Delivery.objects.get(asnno=asnno).assigned_user2
                         if cur_user == " " or cur_user == "":
                             Delivery.objects.filter(asnno=asnno).update(assigned_user2=assigned_user)
-                            messages.warning(request, "User successfully added onto ASN")
+                            messages.success(request, "User successfully added onto ASN")
                             return render(request,"links_app/inbound/assignuser.html",{"user_d":user_d,"data":data})
                         else:
                             cur_user = Delivery.objects.get(asnno=asnno).assigned_user3
                             if cur_user == " " or cur_user == "":
                                 Delivery.objects.filter(asnno=asnno).update(assigned_user3=assigned_user)
-                                messages.warning(request, "User successfully added onto ASN")
+                                messages.success(request, "User successfully added onto ASN")
                                 return render(request,"links_app/inbound/assignuser.html",{"user_d":user_d,"data":data})
                             else:
                                 messages.warning(request, "ASN cannot be assigned to more than 3 users")
@@ -375,18 +396,18 @@ def assignuser(request):
         del_user = del_user[:-2]
         if user_position == 1:
             Delivery.objects.filter(asnno=asnno,assigned_user1=del_user).update(assigned_user1=" ")
-            messages.warning(request,"User has been successfully removed from ASN")
+            messages.success(request,"User has been successfully removed from ASN")
             return render(request,"links_app/inbound/assignuser.html",{"user_d":user_d,"data":data})
         elif user_position == 2:
             Delivery.objects.filter(asnno=asnno,assigned_user2=del_user).update(assigned_user2=" ")
-            messages.warning(request,"User has been successfully removed from ASN")
+            messages.success(request,"User has been successfully removed from ASN")
             return render(request,"links_app/inbound/assignuser.html",{"user_d":user_d,"data":data})
         elif user_position == 3:
             Delivery.objects.filter(asnno=asnno,assigned_user3=del_user).update(assigned_user3=" ")
-            messages.warning(request,"User has been successfully removed from ASN")
+            messages.success(request,"User has been successfully removed from ASN")
             return render(request,"links_app/inbound/assignuser.html",{"user_d":user_d,"data":data})
         else:
-            messages.warning(request,"Please select user to be deleted from ASN")
+            messages.warning(request,"Please select a user to be deleted from ASN")
             return render(request,"links_app/inbound/assignuser.html",{"user_d":user_d,"data":data})
 
     else:
@@ -394,14 +415,9 @@ def assignuser(request):
 
     return render(request,"links_app/inbound/assignuser.html",{"user_d":user_d,"data":data})
 
-#def asn_users(request,user_d):
-    #user1 = Delivery.objects.get(Q(status=asn_status[1])|Q(status=asn_status[2])|Q(status=asn_status[3]),assigned_user1=str(user_d)).assigned_user1
-    #user2 = Delivery.objects.get(Q(status=asn_status[1])|Q(status=asn_status[2])|Q(status=asn_status[3]),assigned_user2=str(user_d)).assigned_user2
-    #user3 = Delivery.objects.get(Q(status=asn_status[1])|Q(status=asn_status[2])|Q(status=asn_status[3]),assigned_user3=str(user_d)).assigned_user3
-    #return user1,user2,user3
 
 def asn_users(request,user_d):
-    all_users = Delivery.objects.filter(Q(status=asn_status[1])|Q(status=asn_status[2])|Q(status=asn_status[3]))
+    all_users = Delivery.objects.filter(Q(status="DeliveryCreated")|Q(status="New")|Q(status="Inprogress"))
     user1 = []
     user2 = []
     user3 = []
@@ -449,7 +465,9 @@ def user_postion(request,index,user_d):
         totalqty = 0
         qtyreceived = 0 
         return Data,asnno_s,totalqty,qtyreceived
-        
+
+
+linestatus = ["New","Inprogress","Closed","Damaged","Picked",'Packed','Shipped',"BackOrder"]
 def received(request,user_d,productcode,qty,type_rec,token,asnno_s,hu,Data,totalqty,qtyreceived,Data_r):
     if type_rec == "Good":
         #Loading Interrim
@@ -460,7 +478,7 @@ def received(request,user_d,productcode,qty,type_rec,token,asnno_s,hu,Data,total
         #Loading AsnLines
         source_qty = AsnLines.getQty(asnno_s,productcode)
         qtyreceived = int(qty)+int(source_qty)
-        linestatuss = linestatus[1]
+        linestatuss = "Inprogress"
         AsnLines.loadLines(asnno_s,productcode,qtyreceived,linestatuss)
         #Loading Transactions
         dept_w = "Inbound"
@@ -476,12 +494,13 @@ def received(request,user_d,productcode,qty,type_rec,token,asnno_s,hu,Data,total
         targetarea = "RCVBIN1"
         holdingu = hu
         Transactions.transactions(dept_w,w_type,origin,productcode,sourcearea,sourcebin,initialsoh,qty,resultsoh,targetbin,targetarea,holdingu,user_d)
-        messages.warning(request,"Successfully Received part")
+        messages.success(request,"Part Number received successfully")
         return render(request,"links_app/inbound/receiveasn.html",{"user_d":user_d,"data":Data,"totalqty":totalqty,"qtyreceived":qtyreceived,"Data_r":Data_r})
+        
     else:
         source_qty = AsnLines.getDamageQty(asnno_s,productcode)
         qtyreceived = int(qty)+int(source_qty)
-        linestatuss = linestatus[1]
+        linestatuss = "Inprogress"
         AsnLines.loadDamageLines(asnno_s,productcode,qtyreceived,linestatuss)
 
         dept_w = "Inbound"
@@ -497,106 +516,120 @@ def received(request,user_d,productcode,qty,type_rec,token,asnno_s,hu,Data,total
         targetarea = "Damaged"
         holdingu = hu
         Transactions.transactions(dept_w,w_type,origin,productcode,sourcearea,sourcebin,initialsoh,qty,resultsoh,targetbin,targetarea,holdingu,user_d)
-        messages.warning(request,"Successfully Received part into Damages")
+        messages.success(request,"Damages successfully Received")
         return render(request,"links_app/inbound/receiveasn.html",{"user_d":user_d,"data":Data,"totalqty":totalqty,"qtyreceived":qtyreceived,"Data_r":Data_r})
 
 
 
-@login_required
+asn_status = ["AsnCreated","DeliveryCreated","New","Inprogress","Closed","Complete"]
 def receiveasn(request):
     user_d = request.user
-    index = asn_users(request,user_d)
-    Data,asnno_s,totalqty,qtyreceived = user_postion(request,index,user_d)
-    Data_r = AsnLines.objects.all().filter(asnno=asnno_s)
-    if Data == "":
-        return render(request,"links_app/inbound/receiveasn.html")
+    if User.objects.filter(username=str(user_d)).first() is None:
+        return HttpResponseRedirect(reverse("index"))
     else:
-        if "receive" in request.POST:
-            productcode = request.POST['productcode']
-            qty = request.POST['qty']
-            type_rec = request.POST['type']
-            hu = request.POST['hu']
-            token = hu[:2]
-            if (token == "HU" or "PL" or "TU") and len(hu) == 8:
-                if (token == "HU" or "PL"):                                
-                    verify = Transactions.objects.filter(holdingunit=hu).first()
-                    if verify is None:
-                        if verify_PM(request,productcode) is None:
-                            messages.warning(request, "Productcode doesn't exist in PM, please update PM")
-                            return render(request,"links_app/inbound/receiveasn.html",{"user_d":user_d,"data":Data,"totalqty":totalqty,"qtyreceived":qtyreceived,"Data_r":Data_r})
+        index = asn_users(request,user_d)
+        Data,asnno_s,totalqty,qtyreceived = user_postion(request,index,user_d)
+        Data_r = AsnLines.objects.all().filter(asnno=asnno_s)
+        if Data == "":
+            return render(request,"links_app/inbound/receiveasn.html")
+        else:
+            if "receive" in request.POST:
+                productcode = request.POST['productcode']
+                qty = request.POST['qty']
+                type_rec = request.POST['type']
+                hu = request.POST['hu']
+                token = hu[:2]
+                if (token == "HU" or "PL" or "TU") and len(hu) == 8:
+                    if token != "TU":                              
+                        verify = Transactions.objects.filter(holdingunit=hu).first()
+                        if verify is None:
+                            if verify_PM(request,productcode) is None:
+                                messages.warning(request, "Productcode doesn't exist in PM, please update PM")
+                                return render(request,"links_app/inbound/receiveasn.html",{"user_d":user_d,"data":Data,"totalqty":totalqty,"qtyreceived":qtyreceived,"Data_r":Data_r})
+                            else:
+                                productcode = get_productcode(request,productcode)
+                                received(request,user_d,productcode,qty,type_rec,token,asnno_s,hu,Data,totalqty,qtyreceived,Data_r)
                         else:
-                            productcode = get_productcode(request,productcode)
-                            received(request,user_d,productcode,qty,type_rec,token,asnno_s,hu,Data,totalqty,qtyreceived,Data_r)  
+                            messages.warning(request,"This Holdingunit cannot be reused, please created another HU")
+                            return render(request,"links_app/inbound/receiveasn.html",{"user_d":user_d,"data":Data,"totalqty":totalqty,"qtyreceived":qtyreceived,"Data_r":Data_r})
                     else:
-                        messages.warning(request,"This Holdingunit cannot be reused, please created another HU")
-                        return render(request,"links_app/inbound/receiveasn.html",{"user_d":user_d,"data":Data,"totalqty":totalqty,"qtyreceived":qtyreceived,"Data_r":Data_r})
+                        verify = Interrim.objects.filter(holdingunit=hu).first()
+                        if verify is None:
+                            verify = Routing.objects.filter(holdingunit=hu).first()
+                            if verify is None:
+                                if verify_PM(request,productcode) is None:
+                                    messages.warning(request, "Productcode doesn't exist in PM, please update PM")
+                                    return render(request,"links_app/inbound/receiveasn.html",{"user_d":user_d,"data":Data,"totalqty":totalqty,"qtyreceived":qtyreceived,"Data_r":Data_r})
+                                else:
+                                    productcode = get_productcode(request,productcode)
+                                    received(request,user_d,productcode,qty,type_rec,token,asnno_s,hu,Data,totalqty,qtyreceived,Data_r)
+                            else:
+                                messages.warning(request,"TU already holding stock")
+                                return render(request,"links_app/inbound/receiveasn.html",{"user_d":user_d,"data":Data,"totalqty":totalqty,"qtyreceived":qtyreceived,"Data_r":Data_r})
+                        else:
+                            messages.warning(request,"TU already holding stock")
+                            return render(request,"links_app/inbound/receiveasn.html",{"user_d":user_d,"data":Data,"totalqty":totalqty,"qtyreceived":qtyreceived,"Data_r":Data_r})
                 else:
-                    verify = Interrim.objects.filter(holdingunit=hu).first()
-                    if verify is None:
-                        if verify_PM(request,productcode) is None:
-                            messages.warning(request, "Productcode doesn't exist in PM, please update PM")
-                            return render(request,"links_app/inbound/receiveasn.html",{"user_d":user_d,"data":Data,"totalqty":totalqty,"qtyreceived":qtyreceived,"Data_r":Data_r})
-                        else:
-                            productcode = get_productcode(request,productcode)
-                            received(request,user_d,productcode,qty,type_rec,token,asnno_s,hu,Data,totalqty,qtyreceived,Data_r)
+                    messages.warning(request,"This is not valid Holdingunit, please use a valid HU")
+                    return render(request,"links_app/inbound/receiveasn.html",{"user_d":user_d,"data":Data,"totalqty":totalqty,"qtyreceived":qtyreceived,"Data_r":Data_r})
+            elif "execute" in request.POST and "clear" in request.POST and "hu_r" in request.POST:
+                productcode = request.POST['clear']
+                hu = request.POST['hu_r']
+                verify = Interrim.objects.filter(holdingunit=hu,productcode=productcode).first()
+                if verify is None:
+                    messages.warning(request,"Selected part doesn't belong to the HU entered")
+                    return render(request,"links_app/inbound/receiveasn.html",{"user_d":user_d,"data":Data,"totalqty":totalqty,"qtyreceived":qtyreceived,"Data_r":Data_r})
+                else:
+                    qty = int(Interrim.objects.get(holdingunit=hu,productcode=productcode).qty)
+                    int_qty = int(AsnLines.objects.get(asnno=asnno_s,productcode=productcode).qtyreceived)
+
+                    res_qty = int_qty - qty
+                    Interrim.objects.filter(parent = asnno_s,productcode=productcode).delete()
+                    AsnLines.objects.filter(asnno=asnno_s,productcode=productcode).update(qtyreceived=res_qty)
+                
+                    dept_w = "Inbound"
+                    w_type = "Reverse"
+                    origin = asnno_s
+                    productcode = productcode
+                    sourcearea = "RCVAREA"
+                    sourcebin = "RCVBIN1"
+                    initialsoh = int(qty)
+                    qty = int(qty)*-1
+                    resultsoh = 0
+                    targetbin = "Delivery"
+                    targetarea = "ASN"
+                    holdingu = hu
+                    Transactions.transactions(dept_w,w_type,origin,productcode,sourcearea,sourcebin,initialsoh,qty,resultsoh,targetbin,targetarea,holdingu,user_d)
+                    messages.success(request,"Receiving Transaction successfully reversed")
+                    return render(request,"links_app/inbound/receiveasn.html",{"user_d":user_d,"data":Data,"totalqty":totalqty,"qtyreceived":qtyreceived,"Data_r":Data_r})
+            elif "close" in request.POST:
+                Delivery.objects.filter(asnno=asnno_s).update(status="Closed")
+                close_adj = AsnLines.objects.all().filter(asnno = asnno_s)
+                for i in close_adj:
+                    if i.totalqty > i.qtyreceived+i.qtydamaged:
+                        AsnLines.objects.filter(asnno = asnno_s, productcode=i.productcode).update(qtyshort=int(i.totalqty-i.qtyreceived-i.qtydamaged))
+                    elif i.totalqty < i.qtyreceived+i.qtydamaged:
+                        AsnLines.objects.filter(asnno = asnno_s, productcode=i.productcode).update(qtyextra=int(i.qtyreceived- i.totalqty-i.qtydamaged))
                     else:
-                        messages.warning(request,"TU already holding stock")
-                        return render(request,"links_app/inbound/receiveasn.html",{"user_d":user_d,"data":Data,"totalqty":totalqty,"qtyreceived":qtyreceived,"Data_r":Data_r})
-            else:
-                messages.warning(request,"This is not valid Holdingunit, please use a valid HU")
-                return render(request,"links_app/inbound/receiveasn.html",{"user_d":user_d,"data":Data,"totalqty":totalqty,"qtyreceived":qtyreceived,"Data_r":Data_r})
-        elif "execute" in request.POST and "clear" in request.POST:
-            productcode = request.POST['clear']
-            verify = Transactions.objects.filter(workflowtype="Receiving",origin=asnno_s,productcode=productcode).first()
-            if verify is None:
-                messages.warning(request,"Receiving Transaction successfully reversed")
-                return render(request,"links_app/inbound/receiveasn.html",{"user_d":user_d,"data":Data,"totalqty":totalqty,"qtyreceived":qtyreceived,"Data_r":Data_r})
-            else:
-                Interrim.objects.filter(parent = asnno_s,productcode=productcode).delete()
-                AsnLines.objects.filter(asnno=asnno_s,productcode=productcode).update(qtyreceived=0)
-                int_qty = list(Transactions.objects.filter(workflowtype="Receiving",origin=asnno_s,productcode=productcode).aggregate(Sum('qty')).values())[0]
+                        pass
                 dept_w = "Inbound"
-                w_type = "Reverse"
+                w_type = "CloseAsn"
                 origin = asnno_s
-                productcode = productcode
+                productcode = ""
                 sourcearea = "RCVAREA"
                 sourcebin = "RCVBIN1"
-                initialsoh = int(int_qty)
-                qty = int(int_qty)*-1
+                initialsoh = 0
+                qty = 0
                 resultsoh = 0
-                targetbin = "Delivery"
-                targetarea = "ASN"
+                targetbin = ""
+                targetarea = ""
                 holdingu = ""
                 Transactions.transactions(dept_w,w_type,origin,productcode,sourcearea,sourcebin,initialsoh,qty,resultsoh,targetbin,targetarea,holdingu,user_d)
-                messages.warning(request,"Receiving Transaction successfully reversed")
+                messages.warning(request,"ASN closed sucessfully")
                 return render(request,"links_app/inbound/receiveasn.html",{"user_d":user_d,"data":Data,"totalqty":totalqty,"qtyreceived":qtyreceived,"Data_r":Data_r})
-        elif "close" in request.POST:
-            Delivery.objects.filter(asnno=asnno_s).update(status=asn_status[4])
-            close_adj = AsnLines.objects.all().filter(asnno = asnno_s)
-            for i in close_adj:
-                if i.totalqty > i.qtyreceived:
-                    AsnLines.objects.filter(asnno = asnno_s, productcode=i.productcode).update(qtyshort=int(i.totalqty-i.qtyreceived-i.qtydamaged))
-                elif i.totalqty < i.qtyreceived:
-                    AsnLines.objects.filter(asnno = asnno_s, productcode=i.productcode).update(qtyextra=int(i.qtyreceived- i.totalqty-i.qtydamaged))
-                else:
-                    pass
-            dept_w = "Inbound"
-            w_type = "CloseAsn"
-            origin = asnno_s
-            productcode = ""
-            sourcearea = "RCVAREA"
-            sourcebin = "RCVBIN1"
-            initialsoh = 0
-            qty = 0
-            resultsoh = 0
-            targetbin = ""
-            targetarea = ""
-            holdingu = ""
-            Transactions.transactions(dept_w,w_type,origin,productcode,sourcearea,sourcebin,initialsoh,qty,resultsoh,targetbin,targetarea,holdingu,user_d)
-            messages.warning(request,"ASN closed sucessfully")
 
 
-    return render(request,"links_app/inbound/receiveasn.html",{"user_d":user_d,"data":Data,"totalqty":totalqty,"qtyreceived":qtyreceived,"Data_r":Data_r})
+        return render(request,"links_app/inbound/receiveasn.html",{"user_d":user_d,"data":Data,"totalqty":totalqty,"qtyreceived":qtyreceived,"Data_r":Data_r})
 
 
 def load_route(request,targetbin_1,productcode,hu,r_area,r_sut,r_mtype,user_d):
@@ -637,34 +670,28 @@ def create_route(request,productcode,user_d,hu):
         messages.warning(request,"No PFEP setting exist for "+productcode+" ,please request PFEP setting")
         return render(request,"links_app/inbound/putaway.html",{"user_d":user_d})
     else:
-        verify=Routing.objects.filter(holdingunit=hu).first()
+        verify = BinContent.objects.filter(area = r_area,sut=r_sut,movementtype =r_mtype, full="FALSE", route="FALSE",productcode=productcode).first()
         if verify is None:
-            verify = BinContent.objects.filter(area = r_area,sut=r_sut,movementtype =r_mtype, full="FALSE",allocated="FALSE", route="FALSE",productcode=productcode).first()
+            verify = BinContent.objects.filter(area = r_area,sut=r_sut,movementtype =r_mtype, full="FALSE",allocated="FALSE", route="FALSE",qty=0).first()
             if verify is None:
-                verify = BinContent.objects.filter(area = r_area,sut=r_sut,movementtype =r_mtype, full="FALSE",allocated="FALSE", route="FALSE",qty=0).first()
-                if verify is None:
-                    messages.warning(request, "Please change PFEP, no available bins for this productcode PFEP setting")
-                    return render(request,"links_app/inbound/putaway.html",{"user_d":user_d})
-                else:
-                    bin_dict = BinContent.objects.filter(area = r_area,sut=r_sut,movementtype =r_mtype, full="FALSE",allocated="FALSE", route="FALSE",qty=0).values('bin')[0:1]
-                    targetbin_1 = bin_dict[0].get('bin')
-                    qty = load_route(request,targetbin_1,productcode,hu,r_area,r_sut,r_mtype,user_d)
-                    messages.warning(request, "Route successfully created")
-                    return render(request,"links_app/inbound/putaway.html",{"user_d":user_d,"targetbin_1":targetbin_1,"hu":hu,"qty":qty})
+                messages.warning(request, "Please change PFEP, no available bins for this productcode PFEP setting")
+                return render(request,"links_app/inbound/putaway.html",{"user_d":user_d})
             else:
-                bin_dict = BinContent.objects.filter(area = r_area,sut=r_sut,movementtype =r_mtype, full="FALSE",allocated="FALSE", route="FALSE",productcode=productcode).values('bin')[0:1]
+                bin_dict = BinContent.objects.filter(area = r_area,sut=r_sut,movementtype =r_mtype, full="FALSE",allocated="FALSE", route="FALSE",qty=0).values('bin')[0:1]
                 targetbin_1 = bin_dict[0].get('bin')
-                qty = load_route(request,targetbin_1,productcode,hu,r_area,r_sut,r_mtype,user_d)
-                messages.warning(request, "Route successfully created")
-                return render(request,"links_app/inbound/putaway.html",{"user_d":user_d,"targetbin_1":targetbin_1,"hu":hu,"qty":qty})     
         else:
-            messages.warning(request, "Item already has route")
-            return render(request,"links_app/inbound/putaway.html",{"user_d":user_d})
+            bin_dict = BinContent.objects.filter(area = r_area,sut=r_sut,movementtype =r_mtype, full="FALSE", route="FALSE",productcode=productcode).values('bin')[0:1]
+            targetbin_1 = bin_dict[0].get('bin')
+
+        qty = load_route(request,targetbin_1,productcode,hu,r_area,r_sut,r_mtype,user_d)
+        return qty, targetbin_1
 
 
-def putaway_hu(request,hu,productcode,qty,bin,sourceqty,remaining_qty,nw_qty,user_d,TRUE_FALSE):
+
+def putaway_hu(request,hu,productcode,qty,binn,sourceqty,remaining_qty,nw_qty,user_d,TRUE_FALSE,avail_qty):
     #Into Bin Content
-    BinContent.objects.filter(bin = bin).update(productcode=productcode, qty=nw_qty,avail_qty=nw_qty,full=TRUE_FALSE,route="FALSE")
+    avail_qty = qty + avail_qty
+    BinContent.objects.filter(bin = binn).update(productcode=productcode, qty=nw_qty,full=TRUE_FALSE,route="FALSE",avail_qty=avail_qty)
 
 
     #Into WorkFlow
@@ -675,93 +702,107 @@ def putaway_hu(request,hu,productcode,qty,bin,sourceqty,remaining_qty,nw_qty,use
     sourcebin = "RCVBIN1"
     initialsoh = sourceqty
     resultsoh = nw_qty
-    targetbin = bin
-    targetarea = str(BinContent.objects.get(bin=bin).area)
+    targetbin = binn
+    targetarea = str(BinContent.objects.get(bin=binn).area)
     holdingu = hu
     Transactions.transactions(dept_w,w_type,origin,productcode,sourcearea,sourcebin,initialsoh,qty,resultsoh,targetbin,targetarea,holdingu,user_d)
 
 
-def remainqty(request,hu,productcode,qty,bin,sourceqty,remaining_qty,nw_qty,user_d):
+def remainqty(request,hu,productcode,qty,binn,sourceqty,remaining_qty,nw_qty,user_d,avail_qty):
     if remaining_qty == 0:
-        Routing.objects.get(holdingunit=hu).delete()
+        Routing.objects.filter(holdingunit=hu).delete()
         TRUE_FALSE = "FALSE"
-        putaway_hu(request,hu,productcode,qty,bin,sourceqty,remaining_qty,nw_qty,user_d,TRUE_FALSE)
+        putaway_hu(request,hu,productcode,qty,binn,sourceqty,remaining_qty,nw_qty,user_d,TRUE_FALSE,avail_qty)
+        total_avail_qty = list(BinContent.objects.filter(productcode=productcode).aggregate(Sum('avail_qty')).values())[0]
+        total_qty = list(BinContent.objects.filter(productcode=productcode).aggregate(Sum('qty')).values())[0]
+        ProductMaster.objects.filter(productcode=productcode).update(soh=total_qty,avail_qty=total_avail_qty)
         messages.success(request, "Part successfully Putaway")
         return render(request,"links_app/inbound/putaway.html",{"user_d":user_d})
     elif remaining_qty < 0:
-        messages.success(request, "Your are binning more than available qty, please go check with your supervisor")
+        messages.warning(request, "Error, Your are binning more than available qty.")
         return render(request,"links_app/inbound/putaway.html",{"user_d":user_d})
     else:
-        Routing.objects.filter(holdingunit = hu).delete()
+        Routing.objects.filter(holdingunit=hu).delete()
         TRUE_FALSE = "TRUE"
-        putaway_hu(request,hu,productcode,qty,bin,sourceqty,remaining_qty,nw_qty,user_d,TRUE_FALSE)
+        putaway_hu(request,hu,productcode,qty,binn,sourceqty,remaining_qty,nw_qty,user_d,TRUE_FALSE,avail_qty)
+        #Update Interrim remaining Stock
         area = "RCVAREA"
         binn = "RCVBIN1"
         parent = "BinFull"
         qty = remaining_qty
         Interrim.interrims(area,binn,parent,hu,productcode,qty)
+        total_avail_qty = list(BinContent.objects.filter(productcode=productcode).aggregate(Sum('avail_qty')).values())[0]
+        total_qty = list(BinContent.objects.filter(productcode=productcode).aggregate(Sum('qty')).values())[0]
+        ProductMaster.objects.filter(productcode=productcode).update(soh=total_qty,avail_qty=total_avail_qty)
         messages.success(request, "Part successfully Putaway")
         return render(request,"links_app/inbound/putaway.html",{"user_d":user_d})
 
 
-@login_required
+
 def putaway(request):
     user_d = str(request.user)
-    if "route" in request.POST and "hu" in request.POST:
-        hu = request.POST['hu']
-        verify = Routing.objects.filter(holdingunit=hu).first()
-        if verify is None:
-            verify = Interrim.objects.filter(holdingunit=hu).first()
+    if User.objects.filter(username=str(user_d)).first() is None:
+        return HttpResponseRedirect(reverse("index"))
+    else:
+        if "route" in request.POST and "hu" in request.POST:
+            hu = request.POST['hu']
+            verify = Routing.objects.filter(holdingunit=hu).first()
             if verify is None:
-                messages.warning(request,"HU either routed or is not available for routing")
-                return render(request,"links_app/inbound/putaway.html",{"user_d":user_d})
-            else:
-                productcode = Interrim.objects.get(holdingunit=hu).productcode
-                create_route(request,productcode,user_d,hu)
-        else:
-            messages.warning(request,"This HU is already routed")
-            alll = Routing.objects.all().filter(holdingunit=hu)
-            targetbin_1 = str(alll[0].targetbin_1)
-            qty = str(alll[0].qty)
-            return render(request,"links_app/inbound/putaway.html",{"user_d":user_d,"targetbin_1":targetbin_1,"hu":hu,"qty":qty}) 
-    elif "hu" in request.POST and "productcode" in request.POST and "qty" in request.POST and "bin" in request.POST and "confirm" in request.POST and "type" in request.POST:
-        hu = request.POST['hu']
-        qty = request.POST['qty']
-        productcode = request.POST['productcode']
-        bin = request.POST['bin']
-        verify = verify_PM(request,productcode)
-        if verify is None:
-            messages.warning(request,"Productcode doesn't exist")
-            return render(request,"links_app/inbound/putaway.html",{"user_d":user_d})
-        else:
-            productcode = get_productcode(request,productcode)
-            verify = Routing.objects.filter(holdingunit=hu,productcode=productcode).first()
-            if verify is None:
-                messages.success(request, "HU or Productcode doesn't exist")
-                return render(request,"links_app/inbound/putaway.html",{"user_d":user_d})
-            else:
-                verify = Routing.objects.filter(targetbin_1 = bin).first()
+                verify = Interrim.objects.filter(holdingunit=hu).first()
                 if verify is None:
-                    messages.success(request, "Cannot confirmed HU unto unRouted Bin, please route HU")
+                    messages.warning(request,"HU either routed or is not available for routing")
                     return render(request,"links_app/inbound/putaway.html",{"user_d":user_d})
                 else:
-                    verify = BinContent.objects.filter(bin=bin,productcode =productcode).first()
+                    productcode = Interrim.objects.get(holdingunit=hu).productcode
+                    qty, targetbin_1 = create_route(request,productcode,user_d,hu)
+                    messages.success(request, "Route successfully created")
+                    return render(request,"links_app/inbound/putaway.html",{"user_d":user_d,"targetbin_1":targetbin_1,"hu":hu,"qty":qty})     
+            else:
+                messages.warning(request,"This HU is already routed")
+                alll = Routing.objects.all().filter(holdingunit=hu)
+                targetbin_1 = str(alll[0].targetbin_1)
+                qty = str(alll[0].qty)
+                return render(request,"links_app/inbound/putaway.html",{"user_d":user_d,"targetbin_1":targetbin_1,"hu":hu,"qty":qty}) 
+        elif "hu" in request.POST and "productcode" in request.POST and "qty" in request.POST and "bin" in request.POST and "confirm" in request.POST and "type" in request.POST:
+            hu = request.POST['hu']
+            qty = int(request.POST['qty'])
+            productcode = request.POST['productcode']
+            binn = request.POST['bin']
+            verify = verify_PM(request,productcode)
+            if verify is None:
+                messages.warning(request,"Productcode doesn't exist")
+                return render(request,"links_app/inbound/putaway.html",{"user_d":user_d})
+            else:
+                productcode = get_productcode(request,productcode)
+                verify = Routing.objects.filter(holdingunit=hu,productcode=productcode).first()
+                if verify is None:
+                    messages.warning(request, "Error, Either HU incorrect or Productcode doesn't belong inside HU")
+                    return render(request,"links_app/inbound/putaway.html",{"user_d":user_d})
+                else:
+                    verify = Routing.objects.filter(targetbin_1 = binn).first()
                     if verify is None:
-                        #Remaning on Routing
-                        remaining_qty = int(Routing.objects.get(holdingunit = hu).qty) - qty
-                        sourceqty = 0
-                        nw_qty = int(qty)
-                        remainqty(request,hu,productcode,qty,bin,sourceqty,remaining_qty,nw_qty,user_d)                      
+                        messages.warning(request, "Error, Cannot confirmed HU unto unRouted Bin, please route HU")
+                        return render(request,"links_app/inbound/putaway.html",{"user_d":user_d})
                     else:
-                        remaining_qty = int(Routing.objects.get(holdingunit = hu).qty) - qty
-                        sourceqty = int(BinContent.objects.get(bin=bin,productcode =productcode).qty)
-                        nw_qty = int(sourceqty + qty)
-                        remainqty(request,hu,productcode,qty,bin,sourceqty,remaining_qty,nw_qty,user_d)
+                        verify = BinContent.objects.filter(bin=binn,productcode =productcode).first()
+                        if verify is None:
+                            #Remaning on Routing
+                            remaining_qty = int(Routing.objects.get(holdingunit = hu).qty) - qty
+                            sourceqty = 0
+                            nw_qty = int(qty)
+                            avail_qty = 0
+                            remainqty(request,hu,productcode,qty,binn,sourceqty,remaining_qty,nw_qty,user_d,avail_qty)                      
+                        else:
+                            remaining_qty = int(Routing.objects.get(holdingunit = hu).qty) - qty
+                            sourceqty = int(BinContent.objects.get(bin=binn,productcode =productcode).qty)
+                            avail_qty = int(BinContent.objects.get(bin=binn,productcode=productcode).avail_qty)
+                            nw_qty = int(sourceqty + qty)
+                            remainqty(request,hu,productcode,qty,binn,sourceqty,remaining_qty,nw_qty,user_d,avail_qty)
+            return render(request,"links_app/inbound/putaway.html",{"user_d":user_d})
         return render(request,"links_app/inbound/putaway.html",{"user_d":user_d})
-    return render(request,"links_app/inbound/putaway.html",{"user_d":user_d})
         
             
-@login_required
+@user_passes_test(check_admin,"index")
 def pfep(request):
     user_d = request.user
     if "upload_pm" in request.POST:
@@ -774,10 +815,10 @@ def pfep(request):
     form = CsvImportForm()
     data = {'form':form,"user_d":user_d}
 
-    return render(request,"links_app/systemcontrol/pfep.html",data)
+    return render(request,"links_app/systemcontrol/systemmaintenance/pfep.html",data)
 
 
-@login_required
+@user_passes_test(check_admin,"index")
 def asn_inquire(request):
     user_d = request.user
     if "asnno" in request.GET:
@@ -792,7 +833,7 @@ def asn_inquire(request):
             return render(request,"links_app/inquire/asn_inquire.html",{"user_d":user_d,"data":data,"sel_data":sel_data})
     return render(request,"links_app/inquire/asn_inquire.html",{"user_d":user_d})
 
-
+@user_passes_test(check_admin,"index")
 def bin_inquire(request):
     user_d = request.user
 
@@ -816,7 +857,7 @@ def bin_inquire(request):
             return render(request,"links_app/inquire/bin_inquire.html",{"user_d":user_d,"data1":data1})
     return render(request,"links_app/inquire/bin_inquire.html",{"user_d":user_d})
 
-
+@user_passes_test(check_admin,"index")
 def transactions(request):
     user_d = request.user
     query = request.GET.get('search')
@@ -853,6 +894,11 @@ def transactions(request):
 def base_system(request):
     return render(request,"links_app/systemcontrol/base_system.html")
 
+def base_orderm(request):
+    return render(request, "links_app/systemcontrol/base_orderm.html")
+
+
+@user_passes_test(check_admin,"index")
 def routecode_update(request):
     if "upload_pm" in request.POST:
         col_no = 4
@@ -872,7 +918,7 @@ def routecode_update(request):
 
     return render(request, "links_app/systemcontrol/systemmaintenance/routecode_update.html", data)
 
-
+@user_passes_test(check_admin,"index")
 def cust_routecode(request):
     data = RouteCodes.objects.all()
     sel = ["cust_name","accountno","street","surburb",'city','postalcode','emailad','cellno','telno','routecode']
@@ -893,8 +939,7 @@ def cust_routecode(request):
             el.customername = str(request.POST[sel[0]])
             el.customertype='Local'
             el.save()
-            print("Successlly excuted")
-            messages.warning(request,"Customer details Entered successfully")
+            messages.success(request,"Customer details Entered successfully")
             return render(request, "links_app/systemcontrol/systemmaintenance/cust_routecode.html",{"data":data})
         else:
             messages.warning(request,"Email or Account is already in Use")
@@ -904,45 +949,79 @@ def cust_routecode(request):
     return render(request, "links_app/systemcontrol/systemmaintenance/cust_routecode.html",{"data":data})
 
 def loadorderlines(request,orderno,user_d):
-    for i in Routing.objects.all().filter(stagingtype=routing_status[3],route_user=str(user_d)):
+    for i in Routing.objects.all().filter(stagingtype="OrderStaging",route_user=str(user_d)):
+
+        avail_qty = int(ProductMaster.objects.get(productcode=i.productcode).avail_qty)
+        qty = avail_qty - i.qty
+        ProductMaster.objects.filter(productcode=i.productcode).update(avail_qty=qty)
+
         el = OrderLines.objects.create(productcode = i.productcode)
         el.orderno = orderno
         el.qtyordered = i.qty
         el.linestatus = linestatus[0]
         el.save()
 
+@user_passes_test(check_admin,"index")
 def create_pickingslip(request):
     user_d = request.user
     data = Routing.objects.all().filter(stagingtype=routing_status[3],route_user=str(user_d))
     Cust = Customers.objects.all()
     if "search" in request.GET:
         query = request.GET.get('asnno')
-        productcode=ProductMaster.objects.filter(Q(productcode__icontains=query))
-        return render(request,"links_app/outbound/create_pickingslip.html",{"user_d":user_d,"productcode":productcode,"data":data,"Cust":Cust})
+        if query == "" or query == " ":
+            return render(request,"links_app/outbound/create_pickingslip.html",{"user_d":user_d,"data":data,"Cust":Cust})
+        else:
+            productcode=ProductMaster.objects.filter(Q(productcode__icontains=query))
+            avail_qty = []
+            parts = []
+
+            for i in productcode:
+                verify = BinContent.objects.filter(productcode=i.productcode).first()
+                if verify is None:
+                    qty = 0
+                    avail_qty.append(qty)
+                    parts.append(i.productcode)
+                else:
+                    total_qty = list(BinContent.objects.filter(productcode=i.productcode).aggregate(Sum('avail_qty')).values())[0]
+                    avail_qty.append(total_qty)
+                    parts.append(i.productcode)
+
+            df = {"parts":parts,"avail_qty":avail_qty}
+            df = pd.DataFrame(df,columns={"parts","avail_qty"})
+            df = df.to_dict('records')
+            return render(request,"links_app/outbound/create_pickingslip.html",{"user_d":user_d,"data":data,"Cust":Cust,"df":df})
+        
     elif "stage" in request.GET and "sel" in request.GET and "qty" in request.GET:
-        if int(Routing.objects.filter(stagingtype=routing_status[3],route_user=str(user_d)).count()) == 20:
+        if int(Routing.objects.filter(stagingtype="OrderStaging",route_user=str(user_d)).count()) == 20:
             messages.warning(request,"You can only have 20 productcodes per Order, please submit and load another Order")
             return render(request,"links_app/outbound/create_pickingslip.html",{"user_d":user_d,"data":data,"Cust":Cust})
         else:
             qty = int(request.GET.get('qty'))
             productcode = request.GET.get("sel")
-            stagingtype=routing_status[3]
-            hu = placeholder[3]
-            targetbin_1 = placeholder[2]
-            Routing.routing(stagingtype,hu,productcode,qty,targetbin_1,user_d)
+            stagingtype="OrderStaging"
+            hu = "ORDERNO"
+            targetbin_1 = "ORDER"
 
-            messages.warning(request,"Line staged successfully")
+            verify = Routing.objects.filter(productcode=productcode,route_user=str(user_d)).first()
+            if verify is None:
+                Routing.routing(stagingtype,hu,productcode,qty,targetbin_1,user_d)
+            else:
+                int_qty =  int(Routing.objects.get(productcode=productcode,route_user=str(user_d)).qty)
+                qty = int_qty+qty
+                Routing.objects.filter(productcode=productcode,route_user=str(user_d)).update(qty=qty)
+
+            messages.success(request,"Line staged successfully")
             return render(request,"links_app/outbound/create_pickingslip.html",{"user_d":user_d,"data":data,"Cust":Cust})
     elif "execute" in request.GET and "selected" in request.GET:
         productcode = request.GET.get("selected")
-        Routing.objects.filter(productcode=productcode,stagingtype=routing_status[3],route_user=str(user_d)).delete()
+        Routing.objects.filter(productcode=productcode,stagingtype="OrderStaging",route_user=str(user_d)).delete()
         messages.warning(request, "Part successfully remove from staging")
         return render(request,"links_app/outbound/create_pickingslip.html",{"user_d":user_d,"data":data,"Cust":Cust})
 
     elif "create" in request.GET:
-        verify = Routing.objects.filter(stagingtype=routing_status[3],route_user=str(user_d)).first()
+        verify = Routing.objects.filter(stagingtype="OrderStaging",route_user=str(user_d)).first()
         if verify is None:
-            messages.warning(request, "There are not productcodes staged to order creations")
+            messages.warning(request, "Error, There are not productcodes staged for order create")
             return render(request,"links_app/outbound/create_pickingslip.html",{"user_d":user_d,"data":data,"Cust":Cust})
         else:
             customercode = request.GET.get("customercode")
@@ -963,6 +1042,7 @@ def create_pickingslip(request):
     return render(request,"links_app/outbound/create_pickingslip.html",{"user_d":user_d,"data":data,"Cust":Cust})
 
 
+@user_passes_test(check_admin,"index")
 def product_inquire(request):
     user_d = request.user
     if "search" in request.POST:
@@ -979,6 +1059,39 @@ def product_inquire(request):
     return render(request,"links_app/inquire/product_inquire.html",{"user_d":user_d})
 
 
+
+def report_extract(query,columns,rows):
+
+    response = HttpResponse(content_type='application/ms-excel')
+    response['Content-Disposition'] = 'attachment; filename="{}.xls"'.format(query)
+
+    wb = xlwt.Workbook(encoding='utf-8')
+    ws = wb.add_sheet(query) # this will make a sheet named Users Data
+
+    row_num = 0
+
+    font_style = xlwt.XFStyle()
+    font_style.font.bold = True
+
+    for col_num in range(len(columns)):
+        ws.write(row_num, col_num, columns[col_num], font_style) # at 0 row 0 column 
+
+    
+    font_style = xlwt.XFStyle()
+
+    for row in rows:
+        row_num += 1
+        for col_num in range(len(row)):
+            ws.write(row_num, col_num, row[col_num], font_style)
+
+        
+    wb.save(response)
+
+
+    return response
+
+
+@user_passes_test(check_admin,"index")
 def rep_inbound(request):
     user_d = request.user
     if "download" in request.GET:
@@ -1033,6 +1146,10 @@ def rep_inbound(request):
     return render(request,"links_app/reports/rep_inbound.html",{"user_d":user_d})
 
 
+
+
+
+@user_passes_test(check_admin,"index")
 def rep_inventory(request):
     user_d = request.user
     if "download" in request.GET:
@@ -1071,6 +1188,7 @@ def rep_inventory(request):
     return render(request,"links_app/reports/rep_inventory.html",{"user_d":user_d})
 
 
+@user_passes_test(check_admin,"index")
 def analytics(request):
     user_d = request.user
     data = Transactions.objects.filter(workflowtype="Receiving").values("productcode").annotate(total = Sum('qty'))
@@ -1098,17 +1216,19 @@ area = {"0":"Select Area",'1': 'Picker', '2': 'Packer'
         ,'3': 'Shipper', '4': 'Receiver', '5': 'Binner'
         , '6': 'Counter', '7': 'Technical',"8":"PalletP"
         ,"9":"FPacker","10":"BPacker"}
+
+@user_passes_test(check_admin,"index")
 def user_management(request):
     user_d = request.user
     if "search" in request.GET:
         query = request.GET.get('asnno')
         employees=User.objects.filter(Q(username__icontains=query))
-        return render(request,"links_app/systemcontrol/systemmaintenance/user_management.html",{"user_d":user_d,'employees':employees})
+        return render(request,"links_app/systemcontrol/user_management.html",{"user_d":user_d,'employees':employees})
     elif "select" in request.GET and "sel" in request.GET:
         sel_user = request.GET.get("sel")
         user_s = int(User.objects.get(username=str(sel_user)).id)
         user_s = Employee.objects.all().filter(user_id=user_s)
-        return render(request,"links_app/systemcontrol/systemmaintenance/user_management.html",{"user_d":user_d,"user_s":user_s,"sel_user":sel_user,"dept":dept,"area":area})
+        return render(request,"links_app/systemcontrol/user_management.html",{"user_d":user_d,"user_s":user_s,"sel_user":sel_user,"dept":dept,"area":area})
     elif "update" in request.GET and "dept" in request.GET and "area" in request.GET:
         selected_user = request.GET.get("selected_user")
         sel_dept = request.GET.get("dept")
@@ -1129,7 +1249,7 @@ def user_management(request):
                 Employee.objects.filter(user_id=user_sel).update(department=sel_dept,area=sel_area)
                 messages.warning(request,"User details updated successfully")
 
-    return render(request,"links_app/systemcontrol/systemmaintenance/user_management.html",{"user_d":user_d})
+    return render(request,"links_app/systemcontrol/user_management.html",{"user_d":user_d})
     
 
 def get_pickers(request,A,B):
@@ -1242,7 +1362,6 @@ def pallet_allocate(request,pallet,pp_id,pp_name):
     for i in pp_name:
         for t in bin1:
             OrderManagement.objects.filter(pickbin3=t,orderedqty__gt=0).update(allocated_user1=i)
-
 
 
 
@@ -1478,7 +1597,7 @@ def load_order(request,orderlist, unique_station):
             break
 
 
-
+@user_passes_test(check_admin,"index")
 def ordermanagement(request):
     user_d = request.user
     data = OrderManagement.objects.all().filter(orderedqty__gt=0)
@@ -1521,6 +1640,8 @@ def ordermanagement(request):
 
     return render(request,"links_app/systemcontrol/systemmaintenance/ordermanagement.html",{"user_d":user_d,"data":data})
 
+
+@user_passes_test(check_admin,"index")
 def allocationcapacity(request):
     user_d = request.user
     if "upload_pm" in request.POST:
@@ -1540,6 +1661,8 @@ def allocationcapacity(request):
     return render(request,"links_app/systemcontrol/systemmaintenance/allocationcapacity.html",data)
 
 
+
+@user_passes_test(check_admin,"index")
 def orderschedule(request):
     user_d = request.user
     df = no_of_picks(request)
@@ -1555,7 +1678,7 @@ def orderschedule(request):
         distribute_picks(request,select)
     else:
         pass
-    return render(request,"links_app/systemcontrol/systemmaintenance/orderschedule.html",{"user_d":user_d,"df":df})
+    return render(request,"links_app/systemcontrol/ordermanagement/orderschedule.html",{"user_d":user_d,"df":df})
 
 
 def orderSlot(request):
@@ -1691,7 +1814,7 @@ def user_slot(request,p_id,p_name,pp_id,pp_name):
 
 def no_of_picks(request):
     pickers = []
-    bin = []
+    binn = []
 
     verify = OrderSchedule.objects.filter().first()
     if verify is None:
@@ -1701,9 +1824,9 @@ def no_of_picks(request):
         for i in data:
             pickers.append(i.allocated_user)
             #a = BinContent.objects.get(i.allocated_bin).area
-            bin.append(i.allocated_bin)
+            binn.append(i.allocated_bin)
 
-        df = {"pickers":pickers,"bin":bin}
+        df = {"pickers":pickers,"bin":binn}
         dff = pd.DataFrame(df,columns={"pickers","bin"})
 
         dff['Area'] = "Mezz"+dff['bin'].str[:1]
@@ -1717,6 +1840,7 @@ def no_of_picks(request):
 
         dff['Sum'] = dff[col].sum(numeric_only=True,axis=1)
         
+        print(dff)
 
         count = len(col)
 
@@ -1728,7 +1852,7 @@ def no_of_picks(request):
 
         picks = []
         for i in pickers:
-            a = OrderSchedule.objects.filter(Q(status="Picked")|Q(status="PickStaging"),allocated_user=i).count()
+            a = OrderSchedule.objects.filter(Q(status="Picked")|Q(status="PickStaging")|Q(status="Packing"),allocated_user=i).count()
             picks.append(a)
         
 
@@ -1737,6 +1861,7 @@ def no_of_picks(request):
         dff['Per'] = round(dff['Picks']/dff['Sum']*100,0)
 
         df = dff.to_dict('records')
+
     return df
 
 
@@ -1809,7 +1934,11 @@ def distribute_picks(request,select):
                     b = dff[dff['id']==i]['binn'].values[0]
                     OrderSchedule.objects.filter(orderno=o,productcode=pc,allocated_bin=b).update(allocated_user=all_users[-1])
 
-      
+
+def orderfulfill(request):
+    count = OrderSchedule.objects.filter(orderno="").count()
+    return
+     
 def user_picks(request):
     user_d = request.user
     verify = OrderSchedule.objects.filter(allocated_user=str(user_d),status="Allocated").first()
@@ -1911,7 +2040,7 @@ def user_picks(request):
 
                             
 
-                            messages.warning(request, "Item picked successfully")
+                            messages.success(request, "Item picked successfully")
                             return render(request,"links_app/outbound/user_picks.html",{"user_d":user_d,"data":data})
 
     return render(request,"links_app/outbound/user_picks.html",{"user_d":user_d,"data":data})
@@ -1940,7 +2069,7 @@ def verify_hu(request,hu):
     return hu
 
 
-
+@user_passes_test(check_admin,"index")
 def outboundStaging(request):
     user_d = request.user
     if "upload_pm" in request.POST:
@@ -1964,33 +2093,36 @@ def outboundStaging(request):
 
 def pickStaging(request):
     user_d = request.user
-    user_id = User.objects.get(username=str(user_d)).id
-    pickertype = Employee.objects.get(user_id=user_id).area
-    if "route" in request.POST and "hu" in request.POST:
-        hu = request.POST['hu']
-        hutype = hu[:2]
-        #loadHUP(request,hu,pickertype)
-        verify = Interrim.objects.filter(holdingunit=hu).first()
-        if verify is None:
-            messages.warning(request,"HUP not available for routing")
-        else:
-            verify = OrderSchedule.objects.filter(status="Picked",pick_hu=hu).first()
+    if User.objects.filter(username=str(user_d)).first() is None:
+        return HttpResponseRedirect(reverse("index"))
+    else:
+        user_id = User.objects.get(username=str(user_d)).id
+        pickertype = Employee.objects.get(user_id=user_id).area
+        if "route" in request.POST and "hu" in request.POST:
+            hu = request.POST['hu']
+            hutype = hu[:2]
+            #loadHUP(request,hu,pickertype)
+            verify = Interrim.objects.filter(holdingunit=hu).first()
             if verify is None:
-                messages.warning(request, "HU is not available for Pick Staging")
+                messages.warning(request,"HUP not available for routing")
             else:
-                orderno = OrderSchedule.objects.get(status="Picked",pick_hu=hu).orderno
-                result = loadHUP(request,hu,pickertype,hutype,orderno)
-                
-                if result == "FALSE":
-                    messages.warning(request,"Staging currently full, please wait")
+                verify = OrderSchedule.objects.filter(status="Picked",pick_hu=hu).first()
+                if verify is None:
+                    messages.warning(request, "HU is not available for Pick Staging")
                 else:
-                    A = "FPacker"
-                    B = "BPacker"
-                    p_id,p_name,pp_id,pp_name=get_pickers(request,A,B)
-                    packer_allocate(request,orderno,p_id,p_name,pp_id,pp_name)
-                    messages.warning(request,"HU Staged successfully")
+                    orderno = OrderSchedule.objects.get(status="Picked",pick_hu=hu).orderno
+                    result = loadHUP(request,hu,pickertype,hutype,orderno)
+                    
+                    if result == "FALSE":
+                        messages.warning(request,"Staging currently full, please wait")
+                    else:
+                        A = "FPacker"
+                        B = "BPacker"
+                        p_id,p_name,pp_id,pp_name=get_pickers(request,A,B)
+                        packer_allocate(request,orderno,p_id,p_name,pp_id,pp_name)
+                        messages.success(request,"HU Staged successfully")
 
-    return render(request, "links_app/outbound/pickstaging.html",{"user_d":user_d})
+        return render(request, "links_app/outbound/pickstaging.html",{"user_d":user_d})
 
 
 def packer_allocate(request,orderno,p_id,p_name,pp_id,pp_name):
@@ -2022,7 +2154,7 @@ def packer_allocate(request,orderno,p_id,p_name,pp_id,pp_name):
             b = p_name[0]
         else:
             b = name[0]
-        
+
     AfterPickStaging.objects.filter(orderno=orderno).update(packer_user=b)
 
   
@@ -2034,32 +2166,35 @@ def loadHUP(request,hu,pickertype,hutype,orderno):
     else:
         verify = AfterPickStaging.objects.filter(Q(holdingvalue=1)|Q(holdingvalue=2),orderno = orderno,hutype=hutype).first()
         if verify is None:
-            all = AfterPickStaging.objects.filter(hutype=hutype,holdingvalue=0,status="TRUE").values_list('area','bin',"holdingvalue","sequence")
-            
-            area = []
-            bin = []
-            slot = []
-            sequence = []
+            verify = AfterPickStaging.objects.filter(Q(orderno="")|Q(orderno=" "),hutype=hutype,holdingvalue=0,status="TRUE").first()
+            if verify is None:
+                result = "FALSE"
+            else:
+                alll = AfterPickStaging.objects.filter(hutype=hutype,holdingvalue=0,status="TRUE").values_list('area','bin',"holdingvalue","sequence")
+                
+                area = []
+                binnn = []
+                slot = []
+                sequence = []
 
-            for i in all:
-                area.append(i[0])
-                bin.append(i[1])
-                slot.append(i[2])
-                sequence.append(i[3])
+                for i in alll:
+                    area.append(i[0])
+                    binnn.append(i[1])
+                    slot.append(i[2])
+                    sequence.append(i[3])
 
-            df = {"area":area,"bin":bin,"slot":slot,"sequence":sequence}
-            
-            
-            all = pd.DataFrame(df,columns= {'area',"bin","slots","sequence"})
-            seq = list(all['sequence'])
-            seq.sort()
-            sel_seq = seq[0]
-            binn = all[all["sequence"]==sel_seq]['bin'].values
-            print(binn)
-            AfterPickStaging.objects.filter(bin=binn[0]).update(holdingunit1=hu,holdingvalue=1,orderno=orderno)
-            update_StageStatus(request,hu,orderno)
+                df = {"area":area,"bin":binnn,"slot":slot,"sequence":sequence}
+                
+                
+                alln = pd.DataFrame(df,columns= {'area',"bin","slots","sequence"})
+                seq = list(alln['sequence'])
+                seq.sort()
+                sel_seq = seq[0]
+                binn = alln[alln["sequence"]==sel_seq]['bin'].values
+                AfterPickStaging.objects.filter(bin=binn[0]).update(holdingunit1=hu,holdingvalue=1,orderno=orderno)
+                update_StageStatus(request,hu,orderno)
 
-            result = "TRUE"
+                result = "TRUE"
 
         else:
             binn = AfterPickStaging.objects.filter(Q(holdingvalue=1)|Q(holdingvalue=2),orderno = orderno).values_list("bin")
@@ -2091,6 +2226,8 @@ def loadHUP(request,hu,pickertype,hutype,orderno):
 
     return result
 
+
+#PickStaging Child LoadHUP Child function - Update OrderSchedule and OrderLines Status to "PickStaging" and clear Imterrim records
 def update_StageStatus(request,hu,orderno):
     OrderSchedule.objects.filter(pick_hu=hu).update(status="PickStaging")
     productcode = Interrim.objects.get(holdingunit=hu).productcode
@@ -2098,88 +2235,109 @@ def update_StageStatus(request,hu,orderno):
     OrderLines.objects.filter(orderno=orderno,productcode=productcode).update(linestatus="PickStaging")
 
 
+#Parent Function - Packing 
 
 def packing(request):
+
     user_d = request.user
-    user_id = User.objects.get(username=str(user_d)).id
-    packtype = Employee.objects.get(user_id=user_id).area
-    data = packer_display(request,user_d)
-    verify = DUConfirm.objects.filter(packer=str(user_d),status="Holder").first()
-    box_type = {"0":"B10",'1': 'B20', '2': 'B30', '3': 'B40', '4': 'BP'}
-    if verify is None:
-        du = "Create DU"
+    if User.objects.filter(username=str(user_d)).first() is None:
+        return HttpResponseRedirect(reverse("index"))
     else:
-        du = str(DUConfirm.objects.get(packer=str(user_d),status="Holder").du)
-
-    if "hu" in request.POST and "qty" in request.POST and "productcode" in request.POST:
-        hu = request.POST['hu']
-        qty = request.POST['qty']
-        productcode = request.POST['productcode']
-        #sel_hu = request.POST['sel_hu']
-        #du = request.POST['du']
-        t = request.POST['submit']
-
-        verify =DUConfirm.objects.filter(packer=str(user_d),status='Holder')
-        if verify is None:
-            messages.warning(request,"Error, please create a DU before DU Confirming a product")
-        else:
-            du = str(DUConfirm.objects.get(packer=str(user_d),status='Holder').du)
-
-            sel_hu = t.partition("|")[0]
-            t = t.partition("|")[2]
-            orderno = t.partition("_")[0]
-            binn = t.partition("_")[2]
-
-            print(orderno)
-            print(binn)
-            print(sel_hu)
-
-            if hu in sel_hu:
-                verify = OrderSchedule.objects.filter(orderno=orderno,productcode=productcode,pick_hu=hu).first()
-                if verify is None:
-                    messages.warning(request,"Error, Productcode scanned doesn not belong in the HU")
-                else:
-                    result = update_Staging_child(request,hu,qty,productcode,binn,orderno)
-                    if result == "FALSE":
-                        messages.warning(request,"DU Confirm failed, please check with IT")
-                    else:
-                        OrderSchedule.objects.filter(orderno=orderno,pick_hu=hu).update(status="Packing",pack_hu=du,packed_qty=qty)
-                        int_qty = int(OrderLines.objects.get(orderno=orderno,productcode=productcode).qtypacked)
-                        new_qty = int_qty+int(qty)
-                        OrderLines.objects.filter(orderno=orderno,productcode=productcode).update(qtypacked=new_qty,linestatus="Packing")
-                        loadDU(request, orderno,du,productcode,new_qty)
-                        messages.warning(request,"DU Confirmed successfully")
-            else:
-                messages.warning(request,"Error, the HU scanned is not the requested HU")
-                    
-
-    elif "execute" in request.POST and "box_type" in request.POST:
-        box_type = request.POST['box_type']
-
+        user_id = User.objects.get(username=str(user_d)).id
+        packtype = Employee.objects.get(user_id=user_id).area
+        data = packer_display(request,user_d)
         verify = DUConfirm.objects.filter(packer=str(user_d),status="Holder").first()
+        box_type = {"0":"B10",'1': 'B20', '2': 'B30', '3': 'B40', '4': 'BP'}
         if verify is None:
-            du = generate_du(request,data,box_type,user_d)
-            messages.warning(request, "DU no: {} successfully created".format(du))
+            du = "Create DU"
         else:
-            messages.warning(request, "Error, You currently have an Open DU under your user")
+            #***Change 2 Below queries to One query***
+            du = str(DUConfirm.objects.get(packer=str(user_d),status="Holder").du)
+            box_type = str(DUConfirm.objects.get(packer=str(user_d),status="Holder").box_type)
 
-    elif "close" in request.POST and "confirm" in request.POST:
-        du = request.POST['confirm']
-        verify = DUConfirm.objects.filter(du=du, packer=str(user_d)).first()
-        if verify is None:
-            messages.warning(request,"Can confirm a Non-existing DU")
-        else:
-            check_qty = list(DUConfirm.objects.filter(du=du,packer=str(user_d),orderno=orderno).aggregate(Sum("qty")).values())[0]
-            if check_qty == 0:
-                messages.warning(request,"Error, Cannot close an empty DU")
+        if "hu" in request.POST and "qty" in request.POST and "productcode" in request.POST and "submit" in request.POST:
+            hu = request.POST['hu']
+            qty = request.POST['qty']
+            productcode = request.POST['productcode']
+            t = request.POST['submit']
+
+            verify = DUConfirm.objects.filter(packer=str(user_d),status='Holder').first()
+            if verify is None:
+                messages.warning(request,"Error, please create a DU before DU Confirming a product")
             else:
-                DUConfirm.objects.filter(du=du,orderno=orderno,status="Holder").delete()
-        pass
-
-    return render(request,"links_app/outbound/packing.html",{"user_d":user_d,"data":data,"du":du,"box_type":box_type})
+                du = str(DUConfirm.objects.get(packer=str(user_d),status='Holder').du)
 
 
-def loadDU(request, du,orderno,productcode,new_qty):
+                sel_hu = t.partition("|")[0]
+                t = t.partition("|")[2]
+                orderno = t.partition("_")[0]
+                binn = t.partition("_")[2]
+
+                verify = DUConfirm.objects.filter(orderno=orderno,du=du).first()
+                if verify is None:
+                    messages.warning(request, "Error, current DU already has orderno allocated, please close and create another DU")
+                else:
+                    if hu in sel_hu:
+                        verify = OrderSchedule.objects.filter(orderno=orderno,productcode=productcode,pick_hu=hu).first()
+                        if verify is None:
+                            messages.warning(request,"Error, Productcode scanned doesn not belong in the HU")
+                        else:
+                            result = update_Staging_child(request,hu,qty,productcode,binn,orderno)
+                            if result == "FALSE":
+                                messages.warning(request,"DU Confirm failed, please check with IT")
+                            else:
+                                OrderSchedule.objects.filter(orderno=orderno,pick_hu=hu).update(status="Packing",pack_hu=du,packed_qty=qty)
+                                int_qty = int(OrderLines.objects.get(orderno=orderno,productcode=productcode).qtypacked)
+                                new_qty = int_qty+int(qty)
+                                OrderLines.objects.filter(orderno=orderno,productcode=productcode).update(qtypacked=new_qty,linestatus="Packing")
+                                loadDU(request, orderno,du,productcode,new_qty,user_d,box_type)
+                                messages.success(request,"HU successfully confirmed in DU")
+                                return render(request,"links_app/outbound/packing.html",{"user_d":user_d,"data":data,"du":du,"box_type":box_type})
+                    else:
+                        messages.warning(request,"Error, the HU scanned is not the requested HU")
+                        
+
+        elif "execute" in request.POST and "box_type" in request.POST:
+            
+            verify = AfterPickStaging.objects.filter(packer_user=str(user_d)).first()
+            if verify is None:
+                messages.warning(request, "Error,No available orderno for DU create")
+                return render(request,"links_app/outbound/packing.html",{"user_d":user_d,"data":data,"du":du,"box_type":box_type})
+            else:
+                box_type = request.POST['box_type']
+
+                verify = DUConfirm.objects.filter(packer=str(user_d),status="Holder").first()
+                if verify is None:
+                    du = generate_du(request,data,box_type,user_d)
+                    messages.success(request, "DU no: {} successfully created".format(du))
+                    return render(request,"links_app/outbound/packing.html",{"user_d":user_d,"data":data,"du":du,"box_type":box_type})
+                else:
+                    messages.warning(request, "Error, You currently have an Open DU under your user")
+
+        elif "confirm" in request.POST and "select_du" in request.POST:
+
+            verify =DUConfirm.objects.filter(packer=str(user_d),status='Holder').first()
+            if verify is None:
+                messages.warning(request,"Error, there is no DU available for closing under current User")
+            else:
+                du = str(DUConfirm.objects.get(packer=str(user_d),status='Holder').du)
+
+                check_qty = list(DUConfirm.objects.filter(du=du,packer=str(user_d)).aggregate(Sum("qty")).values())[0]
+                if check_qty == 0:
+                    messages.warning(request,"Error, Cannot close an empty DU")
+                else:
+                    DUConfirm.objects.filter(du=du,status="Holder").delete()
+                    
+                    DUConfirm.objects.filter(du=du).update(status="Confirmed")
+                    messages.success(request,"DU no: {} confirm successfully".format(du))
+                    return render(request,"links_app/outbound/packing.html",{"user_d":user_d,"data":data,"du":du,"box_type":box_type})
+
+
+        return render(request,"links_app/outbound/packing.html",{"user_d":user_d,"data":data,"du":du,"box_type":box_type})
+
+#Packing Child Function - Loads DU items on DUConfirm to complete DU Confirm 
+#***Migrate to Modoles***
+def loadDU(request, orderno,du,productcode,new_qty,user_d,box_type):
     verify = DUConfirm.objects.filter(du=du,productcode=productcode).first()
     if verify is None:
         el = DUConfirm.objects.create(du=du)
@@ -2187,10 +2345,16 @@ def loadDU(request, du,orderno,productcode,new_qty):
         el.orderno = orderno
         el.qty = new_qty
         el.status = "Packing"
+        el.packer = str(user_d)
+        el.packdate = datetime.now(tz=timezone.utc)
+        el.box_type = box_type
         el.save()
     else:
         DUConfirm.objects.filter(du=du, orderno=orderno, productcode=productcode).update(qty=new_qty)
 
+
+#Packing Child Function - Create A new DU no upon request by Packer 
+#***Migrate to Modoles***
 def generate_du(request,data,box_type,user_d):
     verify = DUConfirm.objects.filter().first()
     if verify is None:
@@ -2209,18 +2373,18 @@ def generate_du(request,data,box_type,user_d):
     el.save()
 
     return du
-        
-    
+
+
+#Packing Child Function - Update Pick Staging once Pack Item has been confirmed on a DU 
 def update_Staging_child(request,hu,qty,productcode,binn,orderno):
-    #Find orderno.
-    hvalue = int(AfterPickStaging.objects.get(bin=binn,orderno=orderno).holdingvalue)
+    hvalue = int(AfterPickStaging.objects.get(bin=binn).holdingvalue)
     hvalue = hvalue - 1
 
-    verify = AfterPickStaging.objects.filter(holdingunit1=hu,orderno=orderno).first()
+    verify = AfterPickStaging.objects.filter(bin=binn,holdingunit1=hu).first()
     if verify is None:
-        verify = AfterPickStaging.objects.filter(holdingunit2=hu,orderno=orderno).first()
+        verify = AfterPickStaging.objects.filter(bin=binn,holdingunit2=hu).first()
         if verify is None:
-            verify = AfterPickStaging.objects.filter(holdingunit3=hu,orderno=orderno).first()
+            verify = AfterPickStaging.objects.filter(bin=binn,holdingunit3=hu).first()
             if verify is None:
                 result = "FALSE"
             else:
@@ -2231,27 +2395,33 @@ def update_Staging_child(request,hu,qty,productcode,binn,orderno):
         AfterPickStaging.objects.filter(bin=binn,orderno=orderno).update(holdingunit1="")
 
     if hvalue == 0:
-        AfterPickStaging.objects.filter(bin=binn).update(orderno="",packer="")
+        AfterPickStaging.objects.filter(bin=binn).update(orderno="",packer_user="")
     else:
         AfterPickStaging.objects.filter(bin=binn).update(holdingvalue=hvalue)
+
+    if AfterPickStaging.objects.filter(bin=binn,holdingunit1="",holdingunit2="",holdingunit3="").first() is None:
+        pass
+    else:
+        AfterPickStaging.objects.filter(bin=binn).update(holdingvalue=0)
 
     result = "TRUE"
     return result
 
 
+#Packing Child Function - Display to the Packer bin containing the next HU packages
 def packer_display(request,user_d):
     verify = AfterPickStaging.objects.filter(packer_user=str(user_d)).first()
     if verify is None:
         data = {"bin":0,"holdingunit1":0,"holdingunit2":0,"holdingunit3":0,"orderno":0}
     else:
-        data = AfterPickStaging.objects.all().filter(packer_user=str(user_d))
+        data = AfterPickStaging.objects.filter(packer_user=str(user_d))
         data = data[0]
     return data
 
 
 
 
-####Close the Current DU, create another DU before continuing with the DU Confirm
+
 
 
         

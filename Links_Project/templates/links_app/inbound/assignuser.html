@@ -63,8 +63,8 @@
         <br>
         <br>
         {% else %}
+        <h4>Login</h4>
         <li><a class="navbar-link" href="{% url 'user_login' %}">Login</a></li>
-        <li><a class="navbar-link" href="{% url 'register' %}">Regsiter</a></li>
         {% endif %}
         {% csrf_token %}
     </body>

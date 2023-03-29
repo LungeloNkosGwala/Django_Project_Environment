@@ -26,13 +26,15 @@
                     <thead class="header" style="top: 0; z-index: 1; background:#eee; ">
                         <th style="top: 0; z-index: 1;" >Productcode</th>
                         <th style="top: 0; z-index: 1;" >Select</th>
+                        <th style="top: 0; z-index: 1;" >Avail Qty</th>
                         <th style="top: 0; z-index: 1;" ><input type="number" min="1" id="qty" name="qty" placeholder="Enter qty" value="{{request.GET.qty}}"></th>
                         <th style="top: 0; z-index: 1;" name="stage" ><button type="submit" class="btn btn-primary" name="stage" style="font-size:8px">Stage</button></th>
                     </thead>
-                    {% for k in productcode %}
+                    {% for k in df %}
                     <tr>
-                        <td>{{k.productcode}}</td>
-                        <td><input type="radio" id="sel" name="sel" value="{{k.productcode}}"></td>
+                        <td>{{k.parts}}</td>
+                        <td><input type="radio" id="sel" name="sel" value="{{k.parts}}"></td>
+                        <th>{{k.avail_qty}}</th>
                         <td></td>
                         <td></td>
                     </tr>

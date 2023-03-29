@@ -71,15 +71,13 @@
                     <table border="1" class="table table-bordered" style="border-collapse: collapse; width: 120%;font-size: 10px">
                         <thead>
                             <th>Productcode</th>
-                            <th>status</th>
                             <th>QtyReceived</th>
-                            <th>Select</th>
+                            <th><input type="text" id="hu_r" name="hu_r"></th>
                             <th>Clear</th>
                         </thead>
                         {% for k in Data_r  %}
                         <tr>
                             <td><button type="submit" id="{{k.productcode}}" name = "{{k.productcode}}" value="{{k.productcode}}">{{k.productcode}}</button></td>
-                            <td>{{k.linestatus}}</td>
                             <td>{{k.qtyreceived}}</td>
                             <td><input type="checkbox" id="receive" name="clear" value="{{k.productcode}}" onclick="onlyOne(this)"></td>
                             <td><button  type ="submit" name = "execute" class ="btn btn-danger" style="font-size: 7px;">Execute</button></td>

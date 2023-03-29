@@ -1,0 +1,24 @@
+
+<!DOCTYPE html>
+{% load static %}
+<link rel="stylesheet" href="{% static 'css/style.css' %}">
+
+<div class="container" style="text-align: center; border-radius: 10px;
+        background-color:#eee;; box-shadow: 0 20px 35px rgba(20,0,20,0.1);
+        width:370px;margin: 0.1rem auto;"><h1 style="color: green;font-size: 30px;">Order Schedule</h1></div>
+        <div class="container"><hr class="rounded" style="border-top: 8px solid #bbb;border-radius: 5px;width: 100%"></div>
+
+<div class="container">
+    <div class="btn_order_menu">
+
+        <button class="order_menu" style = "background-color: grey; color: black;border: 2px solid #555555;border-radius: 8px;">
+            <a href="{% url 'orderschedule' %}" style="text-decoration: none;color:white;">Picker Lines</a></button>
+        <button class="order_menu" style = "background-color: grey; color: black;border: 2px solid #555555;border-radius: 8px;">
+            <a href="#" style="text-decoration: none;color:white;">Packer Lines</a></button>
+        <button class="order_menu" style = "background-color: grey; color: black;border: 2px solid #555555;border-radius: 8px;">
+            <a href="#" style="text-decoration: none;color:white;">Order Fulfillment</a></button>
+        <button class="order_menu" style = "background-color: grey; color: black;border: 2px solid #555555;border-radius: 8px;">
+            <a href="#" style="text-decoration: none;color:white;">Shipping</a></button>
+    </div>
+
+</div>

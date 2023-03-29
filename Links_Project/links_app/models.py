@@ -22,6 +22,9 @@ class ProductMaster(models.Model):
     sut = models.CharField(max_length=30)
     movementtype = models.CharField(max_length=5)
     status = models.CharField(max_length=30)
+    soh = models.IntegerField(default=0)
+    avail_qty = models.IntegerField(default=0)
+    onhold_qty = models.IntegerField(default=0)
 
 
 class Employee(models.Model):
@@ -109,7 +112,7 @@ class AsnLines(models.Model):
 
     @classmethod
     def loadDamageLines(self,asnno_s,productcode,qtyreceived,linestatuss):
-        AsnLines.objects.filter(asnno=asnno_s,productcode=productcode).update(qtydamanged=qtyreceived,linestatus=linestatuss)
+        AsnLines.objects.filter(asnno=asnno_s,productcode=productcode).update(qtydamaged=qtyreceived,linestatus=linestatuss)
     
     @classmethod
     def getQty(self,asnno_s,productcode):
@@ -118,8 +121,9 @@ class AsnLines(models.Model):
 
     @classmethod
     def getDamageQty(self,asnno_s,productcode):
-        source_qty = int(AsnLines.objects.get(asnno=asnno_s,productcode=productcode).qtydamanged)
+        source_qty = int(AsnLines.objects.get(asnno=asnno_s,productcode=productcode).qtydamaged)
         return source_qty
+    
 
 
 

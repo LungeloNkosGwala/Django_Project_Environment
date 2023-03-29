@@ -65,8 +65,19 @@
                 
             </div>
         </div>
+        <div class="container"><hr class="rounded" style="border-top: 8px solid #bbb;border-radius: 5px;width: 100%"></div>
+        <div class="container">
+            <div class="col-md-6">
+                <h5>Close DU: {{du}}</h5>
+                <form action="#" method="post">
+                    <input type="checkbox" id="skip" name="select_du" value="#">
+                    <br>
+                    <button class ="btn btn-danger" onclick="alert('Your about to a DU, please Confirm')" type="submit" name="confirm" >Confirm</button>
 
-
+                    {% csrf_token %}
+                </form>
+            </div>
+        </div>
 
 
         {% else %}
